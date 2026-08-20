@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Making Words</title>
+<link rel="stylesheet" href="lib/tokens.css">
+<style>
+  /* ============================================================
+     Making Words Studio — built to Ellie's spec:
+     text ≥32pt everywhere she reads; letters are HUGE;
+     minimum choices on screen; black rest spot (bottom-right,
+     same corner RaeGaze parks in); flat navigation; no symbols.
+     Vowels tinted (book convention); no buzzers, no red X, ever.
+     ============================================================ */
+  :root{
+    --ink:var(--color-ink); --paper:var(--color-paper); --card:#FFFFFF; --line:#D8E0DE;
+    --teal:var(--color-primary); --teal-deep:#0B4E58; --teal-wash:#E4EFEF;
+    --vowel:var(--color-vowel); --vowel-wash:#FBEDE5;   /* vowels in their own color — book convention */
+    --good:var(--color-success); --good-wash:#E5F0EA;
+    --font: "Segoe UI", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box; user-select:none}
+  html,body{height:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--font);
+       overflow:hidden; cursor:default}
+
+  /* ---------- layout shell ---------- */
+  #stage{position:fixed; inset:0; display:flex; flex-direction:column}
+  #prompt{min-height:120px; display:flex; align-items:center; justify-content:center;
+          padding:18px 220px 6px; text-align:center}
+  #prompt .text{font-size:52px; font-weight:650; line-height:1.15; text-wrap:balance}
+  #prompt .sub{font-size:46px; color:#5A6A70; font-weight:500}   /* ≥32pt floor: 46px = 34.5pt */
+  #work{flex:1; display:flex; flex-direction:column; align-items:center;
+        justify-content:center; gap:28px; padding:0 40px}
+  /* choosing phases (sort / first-letter transfer): the word pill + method chip
+     ride HIGH, just under the prompt — the lower field belongs to the growing
+     word stacks (dad 7/28: "elevate the word so you don't run out of space") */
+  #stage.choosing #work{justify-content:flex-start; padding-top:10px; gap:20px}
+  /* Full-bleed keyboard row (dad 7/26): zero gaps, no side margins, flush to the
+     bottom edge; letters split the width evenly; Bold band = 30% of the screen.
+     The far-right cap is an INERT black park pad — ERAgaze parks the cursor at
+     the bottom-right corner on track loss, and that corner must never be a target. */
+  #tray{height:var(--trayH,324px); padding:0; display:flex; justify-content:flex-start;
+        align-items:stretch; gap:0; flex-wrap:nowrap; position:relative; z-index:5}
+
+  /* ---------- letter cards (gaze targets) ---------- */
+  .letter{flex:0 0 var(--letterSize,300px); width:var(--letterSize,300px); height:100%;
+          border-radius:0; background:var(--card);
+          border:0; border-top:3px solid var(--line);
+          display:flex; align-items:center; justify-content:center;
+          font-size:var(--letterFont,180px); font-weight:700; color:var(--ink)}
+  #tray .letter + .letter{border-left:3px solid var(--line)}
+  .letter.vowel{color:var(--vowel); background:var(--vowel-wash)}
+  .letter.used{opacity:.25}
+  .letter.small{flex-basis:calc(var(--letterSize,300px)*0.72); width:calc(var(--letterSize,300px)*0.72);
+                height:100%; font-size:calc(var(--letterFont,180px)*0.68)}
+  /* inert park pad: black rest spot capping the row's right end (absorbs px rounding) */
+  #parkPad{flex:1 1 var(--parkW,160px); min-width:var(--parkW,160px); height:100%;
+           background:var(--ink); border-top:3px solid var(--line); border-left:3px solid var(--line)}
+
+  /* ---------- word slots ---------- */
+  #slots{display:flex; gap:var(--slotGap,16px); min-height:150px; align-items:center}
+  .slot{width:var(--slotW,130px); height:calc(var(--slotW,130px)*1.15); border-radius:16px; border:3px dashed #B9C6C3;
+        background:#FDFEFD; display:flex; align-items:center; justify-content:center;
+        font-size:calc(var(--slotW,130px)*0.72); font-weight:700}
+  .slot.filled{border-style:solid; border-color:var(--teal); background:var(--teal-wash); color:var(--teal-deep)}
+  .slot.match{border-color:var(--good); background:var(--good-wash); color:var(--good)}
+  /* "still looking" — neutral dashed teal, deliberately NOT the vowel color, never red/orange */
+  .slot.check{border-style:dashed; border-color:var(--teal); background:#FDFEFD; color:var(--teal-deep)}
+  /* RENDERED MISTAKE (dad 7/28): her wrong letters HOLD on screen, calmly marked,
+     while the voice talks about them — never an X, never a buzzer; letters stay hers */
+  .slot.miss{border-style:solid; border-color:#C0564A; background:#F9EAE7; color:#A33F36}
+  .slot.locked{border-color:var(--good); background:var(--good-wash); color:var(--good)}
+
+  /* model word row (compare-and-fix) */
+  #model{display:flex; gap:16px; align-items:center; min-height:0}
+  #model{gap:var(--slotGap,16px)}
+  #model .m{width:var(--slotW,130px); height:calc(var(--slotW,130px)*0.85); border-radius:14px; background:var(--card);
+            border:3px solid var(--line); display:flex; align-items:center; justify-content:center;
+            font-size:calc(var(--slotW,130px)*0.6); font-weight:700; color:var(--ink)}
+
+  /* sort word-stacks: each column's sorted words float above its bottom-row head */
+  #colStacks{position:fixed; inset:0; pointer-events:none; z-index:4}
+  .colstack{position:fixed; display:flex; flex-direction:column-reverse; align-items:center; gap:10px}
+  .colstack .colword{font-size:60px; font-weight:650; color:var(--ink)}
+
+  /* ---------- sort columns ---------- */
+  #cols{display:flex; gap:var(--colGap,34px); align-items:flex-start; justify-content:center;
+        max-width:100vw; padding:0 40px}
+  .col{display:flex; flex-direction:column; gap:14px; align-items:center; min-width:0}
+  .colhead{width:var(--colW,300px); padding:18px 10px; box-sizing:border-box;
+           border-radius:20px; background:var(--card);
+           border:3px solid var(--line); font-size:var(--colFont,60px); font-weight:700; text-align:center}
+  .colword{font-size:calc(var(--colFont,60px)*0.72); font-weight:600; color:#41545B}
+  /* reference chips are READ-ALONG content, not chrome (dad 7/28): floor ≥40px,
+     darker ink — she can actually read what she "also made". */
+  #alsoMade{display:flex; gap:18px; justify-content:center; align-items:center; flex-wrap:wrap;
+            font-size:clamp(44px,3.4vw,56px); font-weight:600; color:#41545B; padding:4px 40px}
+  #alsoMade .chip{background:#EDF1F0; border-radius:12px; padding:6px 20px; color:var(--ink)}
+  #sortMethod{display:inline-block; font-size:40px; font-weight:650; color:var(--teal-deep);
+            background:var(--teal-wash); border-radius:100px; padding:8px 24px; margin-bottom:6px}
+  #sortword{font-size:clamp(64px,7vw,96px); font-weight:750; padding:16px clamp(30px,4vw,54px);
+            border-radius:24px; background:var(--ink); color:#fff}
+
+  /* ---------- utility gaze targets ---------- */
+  /* contract-sized (7/28, dad): these are ELLIE'S gaze choices — big-tile floor,
+     74px+ text, real separation. Used by Keep going/Rest + transfer choosers. */
+  .action{padding:30px 60px; border-radius:24px; background:var(--card); border:3px solid var(--line);
+          font-size:clamp(74px,5.5vw,88px); font-weight:700; min-height:180px;
+          min-width:clamp(340px,32vw,600px); display:flex; align-items:center; justify-content:center}
+  .action.primary{background:var(--teal); border-color:var(--teal-deep); color:#fff}
+  #backspace{border-radius:0; font-size:calc(var(--letterFont,180px)*0.55); color:#5A6A70}
+
+  /* the door — top-left, deliberate long dwell, always present */
+  #door{position:fixed; left:26px; top:26px; width:170px; height:110px; border-radius:18px;
+        background:var(--card); border:3px solid var(--line); z-index:50;
+        display:flex; align-items:center; justify-content:center;
+        font-size:56px; font-weight:650; color:#5A6A70}
+
+  /* partner-facing TTS failure banner (she never needs to read this) */
+  #ttsWarn{display:none; position:fixed; top:0; left:50%; transform:translateX(-50%);
+           background:#B23A48; color:#fff; font-size:20px; padding:8px 22px;
+           border-radius:0 0 12px 12px; z-index:70}
+  #ttsWarn.show{display:block}
+
+  /* celebration + secret word */
+  #big{font-size:150px; font-weight:800; letter-spacing:.02em; color:var(--teal-deep)}
+  .confetti{position:fixed; width:14px; height:22px; border-radius:4px; z-index:80; pointer-events:none}
+
+  /* partner strip — TOUCH ONLY (not .dwell => gaze can never activate it) */
+  #partner{position:fixed; left:50%; transform:translateX(-50%); bottom:0; z-index:60;
+           background:rgba(23,39,46,.94); border-radius:18px 18px 0 0; padding:10px 16px;
+           display:flex; gap:12px; transition:opacity .3s; opacity:0; pointer-events:none}
+  #partner.show{opacity:1; pointer-events:auto}
+  #partner button{background:#2A3B43; color:#DFE9E7; border:0; border-radius:12px;
+                  font-size:22px; padding:12px 18px; font-family:var(--font)}
+  #partnerTab{position:fixed; left:50%; transform:translateX(-50%); bottom:0; width:220px; height:16px;
+              z-index:1; background:transparent}  /* under content: real buttons win where they overlap */
+
+  /* screens */
+  .screen{position:fixed; inset:0; display:none; flex-direction:column;
+          align-items:center; justify-content:center; gap:36px; background:var(--paper); z-index:40;
+          padding:32px 48px 56px}   /* bottom padding: choices never kiss the edge/park corner */
+  .screen.show{display:flex}
+  .title{font-size:72px; font-weight:750; text-align:center; text-wrap:balance}
+  .subtitle{font-size:46px; color:#5A6A70; text-align:center; max-width:1000px; line-height:1.35}
+  /* her lesson letters are READING content, not chrome (dad 7/28): floor-size, ink,
+     vowels tinted like the tray (book convention) */
+  #startSub{font-size:min(74px, 3.8vw); color:var(--ink); font-weight:650;
+            white-space:nowrap; max-width:none}   /* one line, scales to fit */
+  #startSub .sv{color:var(--vowel)}
+
+  .row{display:flex; gap:64px; align-items:center; justify-content:center; flex-wrap:wrap}
+
+  @media (prefers-reduced-motion: reduce){ .confetti{display:none} }
+</style>
+<script>
+  // Dwell config — starting values per plan (generous; caregiver-tunable live via partner strip)
+  window.DwellConfig = {
+    ms: 1200, graceMs: 400, decayMs: 1000, padPx: 16, rearmPx: 48,
+    audioPreview: false,           // OFF by design: Studio speaks all coaching itself; dwell.js preview
+                                   // would cancel() coaching mid-sentence. Do not enable here.
+    chime: false, bus: "auto", staleMs: 600, color: "#0F7C8A"   // voice confirms everything; beeps read as "electronic"
+  };
+</script>
+</head>
+<body>
+
+<!-- ======== persistent chrome ======== -->
+<div id="ttsWarn">⚠ Voice not working — words are shown on screen. Check Windows audio/TTS.</div>
+<div id="door" class="dwell" data-dwell-ms="2400" data-dwell-say="door" aria-label="door"><svg viewBox="0 0 24 24" width="60" height="60" fill="none" stroke="#5A6A70" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h7"/><path d="M13 3l4 1.5v15L13 21z" fill="#EDE3D8" stroke="#B98A5E"/><circle cx="14.5" cy="12" r="0.9" fill="#B98A5E" stroke="none"/><path d="M19 12h4m0 0l-2-2m2 2l-2 2"/></svg></div>
+<div id="replay" class="dwell" data-dwell-ms="1600" style="display:none; position:fixed; right:26px; top:26px;
+     width:170px; height:110px; border-radius:18px; background:var(--card); border:3px solid var(--line);
+     z-index:50; align-items:center; justify-content:center; font-size:52px">🔊</div>
+
+<div id="partnerTab"></div>
+<div id="partner">
+  <button id="pPause">⏸ pause</button>
+  <button id="pRepeat">🔁 repeat</button>
+  <button id="pSkip">⏭ skip word</button>
+  <button id="pEasier">🐢 dwell +200</button>
+  <button id="pFaster">🐇 dwell −200</button>
+  <button id="pVoice">🎙 voice</button>
+  <button id="pEnd">🏁 end session</button>
+  <button id="pClose">✕</button>
+</div>
+
+<!-- ======== start screen ======== -->
+<div id="adultBar" style="position:fixed; right:20px; top:20px; z-index:55; display:flex; gap:10px;
+     background:rgba(23,39,46,.92); border-radius:14px; padding:10px 14px; align-items:center">
+  <button class="abtn" id="aPrev">◀</button>
+  <span id="aLesson" style="color:#DFE9E7; font-size:22px; min-width:150px; text-align:center">…</span>
+  <button class="abtn" id="aNext">▶</button>
+  <span style="color:#5A6A70">|</span>
+  <button class="abtn part on" data-part="all">whole</button>
+  <button class="abtn part" data-part="make">make</button>
+  <button class="abtn part" data-part="sort">sort</button>
+  <button class="abtn part" data-part="transfer">transfer</button>
+</div>
+<style>
+  .abtn{background:#2A3B43; color:#DFE9E7; border:0; border-radius:10px; font-size:20px;
+        padding:8px 14px; font-family:var(--font)}
+  .abtn.part.on{background:var(--teal); color:#fff}
+</style>
+
+<div id="sStart" class="screen show">
+  <div class="title" id="startTitle">Making Words</div>
+  <div class="subtitle" id="startSub">…loading her lesson…</div>
+  <div class="row">
+    <div class="action primary dwell" data-dwell-ms="1600" id="btnStart" data-dwell-say="let's play">Let&rsquo;s play! ▶</div>
+  </div>
+</div>
+
+<!-- ======== main stage ======== -->
+<div id="stage" style="display:none">
+  <div id="prompt"><div>
+    <div class="text" id="promptText"></div>
+    <div class="sub" id="promptSub"></div>
+  </div></div>
+  <div id="work">
+    <div id="model"></div>
+    <div id="sortwordWrap"></div>
+    <div id="slots"></div>
+    <div id="cols" style="display:none"></div>
+  </div>
+  <div id="tray"></div>
+</div>
+
+<!-- ======== celebration / secret ======== -->
+<div id="sBig" class="screen">
+  <div class="title" id="bigTitle"></div>
+  <div id="big"></div>
+  <div class="subtitle" id="bigSub"></div>
+  <div class="row" id="bigRow"></div>
+</div>
+
+<!-- ======== rating / end ======== -->
+<div id="sEnd" class="screen">
+  <div class="title">How was that?</div>
+  <!-- rating tiles are HER gaze choices: label at the 74px floor, emoji above it;
+       min-width trimmed so all three sit on one row (dad 7/28 sweep). -->
+  <div class="row">
+    <div class="action dwell" data-dwell-ms="1600" data-rate="easy"  style="font-size:74px; min-width:clamp(300px,26vw,440px)"><span style="font-size:96px">😴</span><br>too easy</div>
+    <div class="action dwell" data-dwell-ms="1600" data-rate="right" style="font-size:74px; min-width:clamp(300px,26vw,440px)"><span style="font-size:96px">😊</span><br>just right</div>
+    <div class="action dwell" data-dwell-ms="1600" data-rate="hard"  style="font-size:74px; min-width:clamp(300px,26vw,440px)"><span style="font-size:96px">😮‍💨</span><br>tricky</div>
+  </div>
+  <div class="subtitle" id="endNote"></div>
+</div>
+
+<script type="module">
+  // contract shim (see lib/contract.js): classic app script stays classic so the
+  // test harness keeps reaching its globals; module runs first in defer order.
+  import { CONTRACT, holdFor, holdForDoor } from "./lib/contract.js";
+  import { confetti } from "./lib/celebrate.js";
+  window.EllieContract = { CONTRACT, holdFor, holdForDoor };
+  window.EllieCelebrate = { confetti };
+</script>
+<script src="dwell.js"></script>
+<script src="speech.js"></script>
+<script src="studio.js" defer></script>
+</body>
+</html>
