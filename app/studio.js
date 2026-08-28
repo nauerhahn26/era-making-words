@@ -1264,10 +1264,24 @@ function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function boot() {
   try {
     const [lessonsRes, runwayRes] = await Promise.all([fetch("lessons.json"), fetch("runway.json")]);
+    // Lesson content ships separately from the app (see README: bring your
+    // own lessons file). A fresh public install has no lessons.json — that is
+    // not a server problem, so say what it really is and where to go next.
+    if (lessonsRes.status === 404) {
+      $("startTitle").textContent = "One more step!";
+      $("startSub").textContent = "This download doesn't include lesson content. Grown-ups: add your family's lessons.json to the app's public folder, then reload. Details at neweracommunications.org.";
+      $("btnStart").style.display = "none";
+      log("boot_no_lessons", {});
+      return;
+    }
     const db = await lessonsRes.json();
     buildDict(db);
     try { const so = await (await fetch("sentences.json")).json(); for (const k in so) if (k[0] !== "_") SENT_OVERRIDES[k.toLowerCase()] = so[k]; } catch {}
-    const runway = await runwayRes.json();
+    // runway.json is optional: without one, run the lessons in order from the
+    // top (progress still advances in-session; the server persists a pointer
+    // only when a runway file exists).
+    const runway = runwayRes.ok ? await runwayRes.json()
+      : { sequence: db.lessons.map(l => ({ lesson: l.lesson })), pointer: 0 };
     S.seq = runway.sequence; S.seqIdx = runway.pointer || 0;
     runwayDb = db; runwayCfg = runway;
     const entry = S.seq[S.seqIdx];
