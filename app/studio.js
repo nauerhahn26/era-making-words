@@ -1253,7 +1253,7 @@ $("door").addEventListener("click", async () => {
     const r = await fetch("http://127.0.0.1:49155/app/exit", { method: "POST" });
     if (r.ok) return;          // ERAgaze is closing this kiosk right now
   } catch { /* no engine here — web fallback */ }
-  location.reload();
+  location.href = "/home/";   // product exit: back to the hub
 });
 
 // ---------- confetti ----------
