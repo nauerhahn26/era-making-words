@@ -1249,11 +1249,18 @@ $("door").addEventListener("click", async () => {
   // EXIT DOOR (phase 4.1): on her devices, ERAgaze closes this kiosk and hands
   // the screen back to TD Snap — no helper needed. Anywhere else (dev browser),
   // fall through to the old in-app reset.
+  // Two jobs on exit: hand the screen back to TD Snap (only ERAgaze can) AND
+  // close this kiosk. An engine compiled before 9/1 did the first and silently
+  // skipped the second, leaving this app running behind TD Snap (dad 9/1), so
+  // the hub — always present — closes the window itself.
+  let handedOff = false;
   try {
     const r = await fetch("http://127.0.0.1:49155/app/exit", { method: "POST" });
-    if (r.ok) return;          // ERAgaze is closing this kiosk right now
-  } catch { /* no engine here — web fallback */ }
-  location.href = "/home/";   // product exit: back to the hub
+    handedOff = r.ok;
+  } catch { /* no engine here */ }
+  try { await fetch("/kiosk/close", { method: "POST" }); } catch {}
+  if (handedOff) return;      // TD Snap is coming forward; the window is closing
+  location.href = "/home/";   // no engine: product exit is back to the hub
 });
 
 // ---------- confetti ----------
