@@ -44,6 +44,17 @@ const check = (n, c, x) => { if (c) { pass++; console.log('  PASS  ' + n); } els
     // video tuning: first-letter sorts use LETTER heads — every column live, no chips
     check(`${vp.width}px: sort heads all on-screen (${sg.heads} letter heads)`,
           sg.leftOk && sg.rightOk && sg.heads >= 2 && sg.heads <= 8, JSON.stringify(sg));
+    // dad 9/3 (I-13 photo): the current-word pill sat on top of a column's
+    // words - stacks must stop under the pill at every height, floor 40px
+    await page.evaluate(() => { for (let i = 0; i < 4; i++) addColWord(document.querySelector('.colstack'), 'hands'); });
+    await sleep(100);
+    const st = await page.evaluate(() => {
+      const pill = document.getElementById('sortword').getBoundingClientRect();
+      const stack = document.querySelector('.colstack').getBoundingClientRect();
+      const font = parseFloat(getComputedStyle(document.querySelector('.colword')).fontSize);
+      return { pillBottom: pill.bottom, stackTop: stack.top, font, n: document.querySelectorAll('.colword').length };
+    });
+    check(`${vp.width}px: a 4-word stack stays under the current-word pill`, st.stackTop >= st.pillBottom && st.font >= 40, JSON.stringify(st));
     await page.close();
   }
   await browser.close();

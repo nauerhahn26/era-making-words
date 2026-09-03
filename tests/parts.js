@@ -40,6 +40,32 @@ const check = (n, c, x) => { if (c) { pass++; console.log('  PASS  ' + n); } els
   await page.click('#partnerTab');
   for (let i = 0; i < 16; i++) { if (await page.locator('#sEnd.show').count()) break; await page.click('#pSkip'); await sleep(350); }
   check('sort-only ends at rating screen', await page.locator('#sEnd.show').count() === 1);
+  // dad 9/3 on the I-13 (1280x720 CSS px): "not enough space for too easy, just
+  // right" - the three tiles must sit whole on the screen, under the adult bar
+  await page.setViewportSize({ width: 1280, height: 720 }); await sleep(300);
+  const fit = await page.evaluate(() => {
+    const bar = document.getElementById('adultBar').getBoundingClientRect();
+    const tiles = [...document.querySelectorAll('#sEnd .action')].map(t => t.getBoundingClientRect());
+    const title = document.querySelector('#sEnd .title').getBoundingClientRect();
+    return { n: tiles.length, titleBelowBar: title.top >= bar.bottom,
+             inside: tiles.every(r => r.top >= bar.bottom && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth),
+             gap: Math.min(...tiles.slice(1).map((r, i) => r.top - tiles[i].bottom)),
+             font: getComputedStyle(document.querySelector('#sEnd .action')).fontSize };
+  });
+  check('end screen: three whole tiles on a 1280x720 kiosk, below the adult bar', fit.n === 3 && fit.inside && fit.titleBelowBar, JSON.stringify(fit));
+  check('end screen: tiles keep the 74px floor and real separation', parseFloat(fit.font) >= 74 && fit.gap >= 20, JSON.stringify(fit));
+  await page.setViewportSize({ width: 1920, height: 1080 }); await sleep(300);
+  // ...and rating is not a dead end: "I could not move on to transfer/make, I had to exit"
+  await page.locator('#sEnd .action[data-rate="right"]').click(); await sleep(3200);
+  const after = await page.evaluate(() => ({ phase: S.phase, start: document.getElementById('sStart').classList.contains('show'),
+    bar: getComputedStyle(document.getElementById('adultBar')).display, btn: document.getElementById('btnStart').textContent,
+    op: document.getElementById('btnStart').style.opacity, starting: S.starting }));
+  check('after rating: back on the start screen with the adult bar', after.phase === 'start' && after.start && after.bar === 'flex', JSON.stringify(after));
+  check('after rating: "Let\'s play" is fresh (text + opacity + state reset)', /play/.test(after.btn) && after.op === '' && !after.starting, JSON.stringify(after));
+  // the adult bar's part buttons pick the next part and land on the start screen right away
+  await page.evaluate(() => { S.phase = 'end'; show('sEnd'); }); await sleep(200);
+  await page.click('.abtn.part[data-part="transfer"]'); await sleep(300);
+  check('adult "transfer" on the end screen goes to the start screen', await page.evaluate(() => S.phase === 'start' && S.part === 'transfer' && document.getElementById('sStart').classList.contains('show')));
 
   console.log('C) transfer-only day: columns arrive pre-sorted');
   await page.reload(); await page.evaluate(() => Dwell.set({ ms: 250, graceMs: 120, decayMs: 250 })); await sleep(900);

@@ -176,6 +176,26 @@ function buildChoiceTray(labels, onPick, holdMs) {
   return { heads, stacks: stackEls };
 }
 
+// Stacks grow UP from the tray toward the current-word pill; on a short screen
+// (the I-13 is 720 CSS px tall) three 60px words already reach it. Size the
+// stack words so the tallest stack stops 12px under the pill (floor 40px).
+function fitStacks() {
+  const stacks = document.getElementById("colStacks"); if (!stacks) return;
+  const n = Math.max(0, ...[...stacks.children].map(st => st.children.length)); if (!n) return;
+  const pill = document.getElementById("sortword");
+  const top = pill ? pill.getBoundingClientRect().bottom + 12 : 0;
+  const bottom = stacks.children[0].getBoundingClientRect().bottom;
+  const room = bottom - top;
+  const font = Math.max(40, Math.min(60, Math.floor((room - (n - 1) * 8) / (n * 1.2))));
+  stacks.style.setProperty("--colFont", font + "px");
+  stacks.style.setProperty("--colGap", (font >= 60 ? 10 : 6) + "px");
+}
+function addColWord(col, w) {
+  const d = document.createElement("div"); d.className = "colword"; d.textContent = w;
+  col.appendChild(d);
+  fitStacks();
+}
+
 // ---------- slot helpers (positional, with locking) ----------
 function secretWord() { return (S.lesson.secret_word || "").split("/")[0].trim(); }
 function targetWordNow() {
@@ -711,14 +731,33 @@ let sortSeq = null;
 function sortRemaining() {
   if (sortSeq) return sortSeq;
   const cols = sortColumns().map((c, ci) => (isFirstLetterSort() ? c : c.slice(1)).map(w => ({ w, ci })));
-  // easier first (shorter words), then interleave columns so the answer never
-  // telegraphs itself by position; light shuffle inside each tier
+  // Mixed up, shorter first (dad 9/3: "all the rhyme words came in order").
+  // A real shuffle (the old `Math.random() - 0.5` comparator barely moved
+  // anything), then a stable sort by length so the shuffle survives inside
+  // each tier. Each draw looks at the words within one letter of the shortest
+  // left, skips the column just used, and takes from the column with the most
+  // still waiting - so a big family (band hand sand stand) is spread through
+  // the run instead of ending it as a giveaway streak. First word: shortest.
   const flat = cols.flat();
-  flat.sort((a, b) => a.w.length - b.w.length || Math.random() - 0.5);
+  for (let i = flat.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [flat[i], flat[j]] = [flat[j], flat[i]];
+  }
+  flat.sort((a, b) => a.w.length - b.w.length);
   const seq = [];
   while (flat.length) {
-    let pick = flat.findIndex(x => seq.length < 2 || !(x.ci === seq[seq.length - 1].ci && x.ci === seq[seq.length - 2].ci));
-    if (pick === -1) pick = 0;                     // only one column left — allow the run
+    const last = seq.length ? seq[seq.length - 1].ci : -1;
+    const left = ci => flat.filter(x => x.ci === ci).length;
+    let pick = 0;
+    if (seq.length) {
+      const cap = flat[0].w.length + 1;
+      let best = -1;
+      flat.forEach((x, i) => {
+        if (x.ci === last || x.w.length > cap) return;
+        if (best === -1 || left(x.ci) > left(flat[best].ci)) best = i;   // ties: the earlier = shorter one
+      });
+      if (best !== -1) pick = best;                 // else only the last column is left - allow the repeat
+    }
     seq.push(flat.splice(pick, 1)[0]);
   }
   sortSeq = seq.map(x => x.w);
@@ -801,8 +840,7 @@ async function startSort(forTransfer) {
     sortColumns().forEach((col, idx) => {
       if (!colElByIdx[idx]) return;
       for (const cw of col.slice(1)) {
-        const d = document.createElement("div"); d.className = "colword"; d.textContent = cw;
-        colElByIdx[idx].appendChild(d);
+        addColWord(colElByIdx[idx], cw);
       }
     });
     log("sort_prefilled", {});
@@ -810,12 +848,10 @@ async function startSort(forTransfer) {
   }
   const byRhyme = !isFirstLetterSort();          // the CHOSEN type, always
   els.promptText.textContent = byRhyme ? "Sort the words by rhyme" : "Sort the words by first letter";
+  // No sub-line and no method chip: the title says the sort type, the spoken
+  // line explains it, and on the I-13 the chip sat on top of the word column
+  // (dad 9/3: "remove all that text").
   els.promptSub.textContent = "";
-  let chip = document.getElementById("sortMethod");
-  if (!chip) { chip = document.createElement("div"); chip.id = "sortMethod"; els.sortwordWrap.parentNode.insertBefore(chip, els.sortwordWrap); }
-  chip.style.display = "";
-  chip.textContent = byRhyme ? "RHYME — words that sound the same at the end"
-                             : "FIRST LETTER — words that start the same";
   log("sort_start", { chosen: S.sortType, native: S.lesson.sort.type, columns: sortColumns() });
   await say(byRhyme ? "Now let's sort by rhyme! Put the words that sound the same at the end together."
                     : "Now let's sort by the first letter! Put the words that start the same together.");
@@ -833,7 +869,7 @@ async function nextSortWord() {
   const w = currentSortWord();
   if (!w) return sortRecapThenTransfer();
   $("sortword").textContent = w;
-  els.promptSub.textContent = `Word ${S.sortIdx + 1} of ${sortRemaining().length} — read it in your head. Where does it belong?`;
+  els.promptSub.textContent = "";      // no "Word N of M — read it in your head…" (dad 9/3)
   resetNudges();
   // SILENT READING TASK — never speak the word before she sorts it (part2 video).
   // Non-blocking: she can answer while (or instead of) listening.
@@ -853,8 +889,7 @@ async function pickColumn(idx) {
   const ok = idx === correctIdx;
   log("sort_pick", { word: w, picked: heads[idx], ok, sincePrompt: Date.now() - S.lastPromptAt });
   if (ok) {
-    const word = document.createElement("div"); word.className = "colword"; word.textContent = w;
-    (colElByIdx[idx] || els.cols.children[0]).appendChild(word);
+    addColWord(colElByIdx[idx] || els.cols.children[0], w);
     // CELEBRATE-THEN-ADVANCE (dad 7/28): finish the read-together line, THEN
     // show the next word. transitioning guards taps during the celebration.
     S.sortIdx++;
@@ -1003,7 +1038,6 @@ async function startTransfer() {
   S.phase = "transfer"; S.transferIdx = 0;
   els.cols.style.display = "none";            // clean transfer screen — no sort columns
   const sw = $("sortword"); if (sw) sw.style.display = "none";
-  const sm = $("sortMethod"); if (sm) sm.style.display = "none";
   els.promptText.textContent = "New words — you can spell them!";
   log("transfer_start", { words });
   await say("Now the best part. Brand new words — and you already know how to spell them!");
@@ -1024,7 +1058,6 @@ async function startFirstLetterTransfer(wordList) {
   els.slots.style.display = "none"; renderModel(null);
   els.sortwordWrap.innerHTML = "";
   const also = document.getElementById("alsoMade"); if (also) also.innerHTML = "";
-  const sm = document.getElementById("sortMethod"); if (sm) sm.style.display = "none";
   const sw = document.getElementById("sortword"); if (sw) sw.style.display = "none";
   // BOTTOM CHOICE TRAY (dad 7/28): one letter-head per lesson letter in the
   // full-bleed bottom band (her whiteboard columns, now motor-consistent with
@@ -1059,8 +1092,7 @@ async function flPick(idx) {
   const ok = letters[idx] === w[0].toLowerCase();
   log("transfer_fl_pick", { word: w, picked: letters[idx], ok });
   if (ok) {
-    const d = document.createElement("div"); d.className = "colword"; d.textContent = w;
-    colElByIdx[idx].appendChild(d);
+    addColWord(colElByIdx[idx], w);
     FL.idx++;
     // CELEBRATE-THEN-ADVANCE (dad 7/28)
     S.transitioning = true;
@@ -1149,8 +1181,23 @@ document.querySelectorAll("#sEnd .action").forEach(a => {
             : r === "hard" ? "That was tricky. That's okay — tricky means you're learning."
             : "Just right. You're amazing.");
     confetti(18);
+    setTimeout(backToStart, 2000);
   });
 });
+// The rating used to be a dead end (dad 9/3: after a sort-only lesson "I could
+// not move on to transfer/make, I had to exit"). Now it returns to the start
+// screen with the adult bar, so the next part is a tap + "Let's play" away;
+// the adult bar's buttons also leave the end screen at once.
+function backToStart() {
+  if (S.phase !== "end") return;
+  S.phase = "start"; S.rated = false; S.starting = false;
+  S.sortType = null; S.transferType = null;        // the choosers ask again next run
+  const bs = $("btnStart");
+  bs.textContent = "Let\u2019s play! \u25B6"; bs.style.opacity = "";
+  $("adultBar").style.display = "flex";
+  show("sStart");
+  log("back_to_start", {});
+}
 
 // ---------- gentle nudge loop (wait time sacred; never advances anything) ----------
 setInterval(() => {
@@ -1231,14 +1278,15 @@ async function setPointer(idx) {
     body: JSON.stringify({ pointer: idx }) }).catch(() => {});
   log("adult_lesson_change", { lesson: S.lesson.lesson });
 }
-$("aPrev").addEventListener("click", () => setPointer(S.seqIdx - 1));
-$("aNext").addEventListener("click", () => setPointer(S.seqIdx + 1));
+$("aPrev").addEventListener("click", () => { setPointer(S.seqIdx - 1); backToStart(); });
+$("aNext").addEventListener("click", () => { setPointer(S.seqIdx + 1); backToStart(); });
 document.querySelectorAll(".abtn.part").forEach(b => {
   b.addEventListener("click", () => {
     document.querySelectorAll(".abtn.part").forEach(x => x.classList.remove("on"));
     b.classList.add("on");
     S.part = b.dataset.part;
     log("adult_part", { part: S.part });
+    backToStart();
   });
 });
 

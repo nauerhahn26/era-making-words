@@ -38,10 +38,11 @@ let pass=0, fail=0; const check=(n,c,x)=>{ if(c){pass++;console.log('  PASS  '+n
   // Speech.stop exists and clears queue
   const st = await page.evaluate(() => typeof Speech.stop === 'function');
   check('Speech.stop (barge-in) exported', st);
-  // progress now lives in the PROMPT line, never a separate gaze target
-  // (the unreadable tally chip was removed 7/28 — one readable progress indicator).
+  // no progress line and no separate gaze target: the tally chip went 7/28
+  // (unreadable), the "Word 1 of N - read it in your head" sub-line went 9/3
+  // (dad on the I-13: "remove all that text") - the pill alone is the sort screen.
   const noTally = await page.evaluate(() => !document.getElementById('tally'));
-  check('progress in prompt, no separate gaze target', /Word 1 of \d+/.test(t.firstPrompt || '') && noTally, JSON.stringify({ firstPrompt: t.firstPrompt, noTally }));
+  check('no progress text, no separate gaze target', (t.firstPrompt || '') === '' && noTally, JSON.stringify({ firstPrompt: t.firstPrompt, noTally }));
   await b.close();
   console.log('\n'+pass+' passed, '+fail+' failed'); process.exit(fail?1:0);
 })().catch(e=>{console.error(e.message);process.exit(2)});

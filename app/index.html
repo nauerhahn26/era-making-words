@@ -82,8 +82,11 @@
 
   /* sort word-stacks: each column's sorted words float above its bottom-row head */
   #colStacks{position:fixed; inset:0; pointer-events:none; z-index:4}
-  .colstack{position:fixed; display:flex; flex-direction:column-reverse; align-items:center; gap:10px}
-  .colstack .colword{font-size:60px; font-weight:650; color:var(--ink)}
+  .colstack{position:fixed; display:flex; flex-direction:column-reverse; align-items:center; gap:var(--colGap,10px)}
+  /* --colFont is set by fitStacks() (studio.js): on a 1280x720 kiosk a stack of
+     three 60px words climbs into the current-word pill (dad 9/3, "tan" over the
+     column) - the stacks shrink to the room that is there, never under 40px */
+  .colstack .colword{font-size:var(--colFont,60px); font-weight:650; color:var(--ink); line-height:1.2}
 
   /* ---------- sort columns ---------- */
   #cols{display:flex; gap:var(--colGap,34px); align-items:flex-start; justify-content:center;
@@ -98,8 +101,6 @@
   #alsoMade{display:flex; gap:18px; justify-content:center; align-items:center; flex-wrap:wrap;
             font-size:clamp(44px,3.4vw,56px); font-weight:600; color:#41545B; padding:4px 40px}
   #alsoMade .chip{background:#EDF1F0; border-radius:12px; padding:6px 20px; color:var(--ink)}
-  #sortMethod{display:inline-block; font-size:40px; font-weight:650; color:var(--teal-deep);
-            background:var(--teal-wash); border-radius:100px; padding:8px 24px; margin-bottom:6px}
   #sortword{font-size:clamp(64px,7vw,96px); font-weight:750; padding:16px clamp(30px,4vw,54px);
             border-radius:24px; background:var(--ink); color:#fff}
 
@@ -152,8 +153,26 @@
   #startSub .sv{color:var(--vowel)}
 
   .row{display:flex; gap:64px; align-items:center; justify-content:center; flex-wrap:wrap}
+  /* End screen: one tile per row, emoji beside the label. On the I-13's
+     1280x720 the old three-abreast tiles wrapped into a stack taller than the
+     screen and slid under the adult bar (dad 9/3: "not enough space for too
+     easy, just right"). Padding-top clears the adult bar; 74px labels kept. */
+  #sEnd{justify-content:flex-start; padding-top:96px; gap:22px}
+  #sEnd .title{font-size:56px}
+  #sEnd .row{flex-direction:column; gap:22px}
+  #sEnd .action{min-height:0; padding:10px 48px; gap:28px; min-width:clamp(520px,50vw,720px); font-size:74px}
+  #sEnd .action span{font-size:72px; line-height:1}
+  #endNote{font-size:40px}
 
   @media (prefers-reduced-motion: reduce){ .confetti{display:none} }
+  /* Short kiosks (the I-13 is 1280x720 CSS px): the prompt takes one line and
+     the pill sits at the 74px floor so the word stacks have room to grow
+     (dad 9/3 photo: "tan" on top of the column). Wider screens are untouched. */
+  @media (max-height: 800px){
+    #prompt{min-height:0; padding:10px 200px 4px}
+    #prompt .text{font-size:44px}
+    #sortword{font-size:74px; padding:8px 40px}
+  }
 </style>
 <script>
   // Dwell config — starting values per plan (generous; caregiver-tunable live via partner strip)
@@ -238,12 +257,12 @@
 <!-- ======== rating / end ======== -->
 <div id="sEnd" class="screen">
   <div class="title">How was that?</div>
-  <!-- rating tiles are HER gaze choices: label at the 74px floor, emoji above it;
-       min-width trimmed so all three sit on one row (dad 7/28 sweep). -->
+  <!-- rating tiles are HER gaze choices: label at the 74px floor, emoji beside
+       it, one tile per row so all three fit a 1280x720 kiosk (dad 9/3). -->
   <div class="row">
-    <div class="action dwell" data-dwell-ms="1600" data-rate="easy"  style="font-size:74px; min-width:clamp(300px,26vw,440px)"><span style="font-size:96px">😴</span><br>too easy</div>
-    <div class="action dwell" data-dwell-ms="1600" data-rate="right" style="font-size:74px; min-width:clamp(300px,26vw,440px)"><span style="font-size:96px">😊</span><br>just right</div>
-    <div class="action dwell" data-dwell-ms="1600" data-rate="hard"  style="font-size:74px; min-width:clamp(300px,26vw,440px)"><span style="font-size:96px">😮‍💨</span><br>tricky</div>
+    <div class="action dwell" data-dwell-ms="1600" data-rate="easy"><span>😴</span>too easy</div>
+    <div class="action dwell" data-dwell-ms="1600" data-rate="right"><span>😊</span>just right</div>
+    <div class="action dwell" data-dwell-ms="1600" data-rate="hard"><span>😮‍💨</span>tricky</div>
   </div>
   <div class="subtitle" id="endNote"></div>
 </div>

@@ -24,13 +24,13 @@ let pass=0, fail=0; const check=(n,c,x)=>{ if(c){pass++;console.log('  PASS  '+n
     await p; await new Promise(r=>setTimeout(r,300));
     return { dwellMs,
       title: document.getElementById('promptText').textContent,
-      chip: (document.getElementById('sortMethod')||{}).textContent || '',
+      chip: !!document.getElementById('sortMethod'),
       heads: [...document.querySelectorAll('.sorthead')].map(h=>h.textContent),
       seq: sortRemaining() };
   });
   check('chooser cards deliberate (2400ms — reading ≠ choosing)', a.dwellMs.every(d=>d==='2400'), JSON.stringify(a.dwellMs));
   check('title matches CHOSEN type (rhyme)', /rhyme/i.test(a.title), a.title);
-  check('chip matches chosen type', /RHYME/.test(a.chip), a.chip);
+  check('no method chip (dad 9/3: remove all that text)', !a.chip, '');
   check('word heads, not letters', a.heads.every(h=>h.length>1), JSON.stringify(a.heads));
   // order: not grouped by column (no 3-run), shorter words first-ish
   const cols44 = await page.evaluate(() => sortColumns());
