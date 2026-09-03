@@ -112,6 +112,21 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('floor at 800ms', ms >= 800, 'ms=' + ms);
   await page.click('#pClose');
 
+  console.log('K) the door follows the hub (Settings: TD Snap / New ERA, dad 9/3)');
+  // "closed" = the hub is handing the screen to TD Snap and closing the kiosk:
+  // the page must stay put. Anything else = New ERA's home in this window.
+  await page.evaluate(() => { if (window.speechSynthesis) speechSynthesis.speak = u => setTimeout(() => u.onend && u.onend(), 0); });
+  let exitHits = 0;
+  await page.route('**/kiosk/exit', r => { exitHits++; r.fulfill({ status: 200, contentType: 'application/json', body: '{"action":"closed"}' }); });
+  await page.click('#door'); await sleep(700);
+  check('door POSTs /kiosk/exit once', exitHits === 1, 'hits=' + exitHits);
+  check('closed: no navigation (kiosk is closing)', /127\.0\.0\.1:8377\/$/.test(page.url()), page.url());
+  await page.unroute('**/kiosk/exit');
+  await page.route('**/kiosk/exit', r => r.fulfill({ status: 200, contentType: 'application/json', body: '{"action":"home"}' }));
+  await page.click('#door');
+  await page.waitForURL(/\/home\/?$/, { timeout: 8000 }).catch(() => {});
+  check('home: door lands on New ERA home', /\/home\/?$/.test(page.url()), page.url());
+
   await browser.close();
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
