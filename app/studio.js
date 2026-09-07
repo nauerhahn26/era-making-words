@@ -158,7 +158,8 @@ function buildChoiceTray(labels, onPick, holdMs) {
     h.textContent = label;
     if (label.length === 1 && "aeiou".includes(label.toLowerCase())) h.classList.add("vowel");
     if (label.length > 1)                        // word heads (rhyme sorts) fit their cell
-      h.style.fontSize = Math.min(unitW * 0.92 / (0.58 * label.length), bandH * 0.5) + "px";
+      h.style.fontSize = Math.min(unitW * 0.92 / (0.58 * label.length),
+                                  (bandH - SAFE_BOTTOM) * 0.5) + "px";   // clear the taskbar reserve
     h.addEventListener("click", () => onPick(k));
     els.tray.appendChild(h);
     heads.push(h);
@@ -336,6 +337,29 @@ function rowFit(n, cap, avail) {
   return { size, gap };
 }
 function setVar(k, v) { document.documentElement.style.setProperty(k, v + "px"); }
+
+// The design viewport. The original studio was always launched with
+// --force-device-scale-factor=1 (aac-studio/install/windows-device.ps1:50,
+// "scale forced so her layout never shrinks"), so a 1920x1080 panel was a
+// 1920x1080 CSS viewport and every cap below was a small slice of the screen.
+// The hub's kiosk line (era-hub/tools/build-payload.sh:156) drops that flag, so
+// the SAME I-13 at Windows 150% scaling is a 1280x720 CSS viewport and the caps
+// eat 1.5x the screen — the rows stacked taller than the screen and the tray
+// was squeezed (dad 9/6 photos). vs() replays the original's 1080-tall
+// proportions in whatever height we actually get; at 1080 it is exactly 1.
+const DESIGN_H = 1080;
+function vs() { return Math.min(1, window.innerHeight / DESIGN_H); }
+
+// TASKBAR RESERVE (CSS px). Windows keeps the taskbar (~40 CSS px at every
+// display scaling) drawn over the kiosk window whenever the window loses its
+// full-screen state — the documented cold-launch race (era-hub/server.js:327)
+// and a second same-profile launch, which Chromium answers by ignoring --kiosk.
+// The page cannot tell the two apart (innerHeight reads the same), so the
+// letters simply never occupy the bottom strip. index.html gives the tiles a
+// matching padding-bottom: the TILE still reaches the true bottom edge, so the
+// gaze target keeps its full height — only the glyph lifts clear.
+const SAFE_BOTTOM = (window.StudioConfig && window.StudioConfig.safeBottom) ?? 44;
+
 // Full-bleed keyboard row (dad 7/26): letters split the FULL width — no gaps, no
 // side pad. Bold band: 30% of the screen height, constant, flush to the bottom.
 // PARK_UNITS reserves the right-end cap for the inert black park pad (ERAgaze
@@ -347,14 +371,23 @@ function layoutTray(nUnits) {
   setVar("--trayH", bandH);
   setVar("--letterSize", unit);
   setVar("--parkW", Math.floor(unit * PARK_UNITS));
-  setVar("--letterFont", Math.floor(Math.min(unit, bandH) * 0.62));
+  setVar("--safeB", SAFE_BOTTOM);
+  // The original letter size (0.62 of the smaller band dimension) is kept
+  // WHEREVER IT STILL FITS above the reserve — at 1920x1080 that is every case,
+  // so this line is a no-op there. It only bites on a short viewport, where the
+  // glyph would otherwise have run under the taskbar. 0.72: a Segoe UI line box
+  // is ~1.34em, so 0.72em of box height is the largest font that fits.
+  setVar("--letterFont", Math.floor(Math.min(unit * 0.62, bandH * 0.62,
+                                             (bandH - SAFE_BOTTOM) * 0.72)));
 }
 function layoutSlots(len) {
-  const { size, gap } = rowFit(len, 190, window.innerWidth - 2 * SIDE_PAD);  // cap 190 (audit #10)
+  // cap 190 (audit #10) — at the design height; the same fraction below it, so
+  // the slot row plus the model row above it still clear the letter band.
+  const { size, gap } = rowFit(len, Math.round(190 * vs()), window.innerWidth - 2 * SIDE_PAD);
   setVar("--slotW", size); setVar("--slotGap", Math.max(12, gap - 6));
 }
 function layoutCols(nLive, maxHeadLen) {
-  const { size: w, gap } = rowFit(nLive, 460, window.innerWidth - 100);
+  const { size: w, gap } = rowFit(nLive, Math.round(460 * vs()), window.innerWidth - 100);
   const font = Math.min(84, Math.floor((w - 40) / (Math.max(2, maxHeadLen) * 0.62)));  // 0.62: bold glyph width (audit #7)
   setVar("--colW", w); setVar("--colGap", gap); setVar("--colFont", font);
 }
