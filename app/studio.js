@@ -157,9 +157,16 @@ function buildChoiceTray(labels, onPick, holdMs) {
     h.setAttribute("data-dwell-ms", String(holdMs || 1600));   // a pick is a decision
     h.textContent = label;
     if (label.length === 1 && "aeiou".includes(label.toLowerCase())) h.classList.add("vowel");
-    if (label.length > 1)                        // word heads (rhyme sorts) fit their cell
-      h.style.fontSize = Math.min(unitW * 0.92 / (0.58 * label.length),
-                                  (bandH - SAFE_BOTTOM) * 0.5) + "px";   // clear the taskbar reserve
+    // Word heads (rhyme sorts) fit their cell: the word's own width, or half the
+    // band. The taskbar reserve is a CEILING here, not a subtraction — same rule
+    // as --letterFont in layoutTray: keep the declared size WHEREVER IT STILL
+    // FITS above the reserve, and half a band always does (0.5 < 0.72), so this
+    // third term never binds on any viewport she has. Taking the reserve off
+    // FIRST cost every head 22px at every viewport — 162px->140px at 1920x1080,
+    // 108px->86px on her I-13 — for no fit reason at all.
+    if (label.length > 1)
+      h.style.fontSize = Math.min(unitW * 0.92 / (0.58 * label.length), bandH * 0.5,
+                                  (bandH - SAFE_BOTTOM) * 0.72) + "px";
     h.addEventListener("click", () => onPick(k));
     els.tray.appendChild(h);
     heads.push(h);
