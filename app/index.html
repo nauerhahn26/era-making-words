@@ -25,30 +25,59 @@
   body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--font);
        overflow:hidden; cursor:default}
 
-  /* ---------- layout shell ---------- */
-  #stage{position:fixed; inset:0; display:flex; flex-direction:column}
-  #prompt{min-height:120px; display:flex; align-items:center; justify-content:center;
-          padding:18px 220px 6px; text-align:center}
-  #prompt .text{font-size:52px; font-weight:650; line-height:1.15; text-wrap:balance}
-  #prompt .sub{font-size:46px; color:#5A6A70; font-weight:500}   /* ≥32pt floor: 46px = 34.5pt */
-  #work{flex:1; display:flex; flex-direction:column; align-items:center;
-        justify-content:center; gap:28px; padding:0 40px}
+  /* ---------- layout shell ----------
+     VERTICAL FIT (dad 9/6, the I-13 photos: the subtitle sitting on the tile
+     row, the letter bar sliced off under the taskbar).  The original studio was
+     always launched with --force-device-scale-factor=1
+     (aac-board-builder/aac-studio/install/windows-device.ps1:50, "scale forced
+     so her layout never shrinks"), so it always drew into a 1920x1080 CSS
+     viewport and every fixed px below was a small slice of the screen.  The
+     hub's kiosk line (era-hub/tools/build-payload.sh:156) does not pass that
+     flag, so the same 13.3" panel at Windows 150% scaling reports 1280x720 CSS
+     px — every fixed px suddenly costs 1.5x the screen.  The prompt block then
+     outgrew its row and bled into the tiles, and flexbox took the difference
+     out of the letter band.  Rule from here on: a stage size is the ORIGINAL's
+     1080-tall value, or the same FRACTION of the height we actually got,
+     whichever is smaller.  At 1920x1080 every number below is unchanged. */
+  #stage{position:fixed; inset:0; display:flex; flex-direction:column; overflow:hidden}
+  /* flex:0 0 auto on prompt AND tray: the squeeze may only ever come out of the
+     empty middle (#work).  Before, both were shrinkable, so a tight screen
+     squashed #prompt under its own text (which then overprinted the tiles) and
+     stole 34px off the letter band. */
+  #prompt{min-height:min(120px,11.12vh); flex:0 0 auto;
+          display:flex; align-items:center; justify-content:center;
+          padding:min(18px,1.7vh) 220px min(6px,0.6vh); text-align:center}
+  #prompt .text{font-size:min(52px,4.82vh); font-weight:650; line-height:1.15; text-wrap:balance}
+  /* ≥32pt floor: 46px = 34.5pt at the design viewport, and 4.26vh keeps that
+     same PHYSICAL size on a scaled-down viewport of the same panel. */
+  #prompt .sub{font-size:min(46px,4.26vh); color:#5A6A70; font-weight:500}
+  #work{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; align-items:center;
+        justify-content:center; gap:min(28px,2.6vh); padding:0 40px}
   /* choosing phases (sort / first-letter transfer): the word pill + method chip
      ride HIGH, just under the prompt — the lower field belongs to the growing
      word stacks (dad 7/28: "elevate the word so you don't run out of space") */
-  #stage.choosing #work{justify-content:flex-start; padding-top:10px; gap:20px}
+  #stage.choosing #work{justify-content:flex-start; padding-top:10px; gap:min(20px,1.86vh)}
   /* Full-bleed keyboard row (dad 7/26): zero gaps, no side margins, flush to the
      bottom edge; letters split the width evenly; Bold band = 30% of the screen.
      The far-right cap is an INERT black park pad — ERAgaze parks the cursor at
      the bottom-right corner on track loss, and that corner must never be a target. */
-  #tray{height:var(--trayH,324px); padding:0; display:flex; justify-content:flex-start;
+  #tray{height:var(--trayH,324px); flex:0 0 auto; padding:0; display:flex; justify-content:flex-start;
         align-items:stretch; gap:0; flex-wrap:nowrap; position:relative; z-index:5}
 
-  /* ---------- letter cards (gaze targets) ---------- */
+  /* ---------- letter cards (gaze targets) ----------
+     padding-bottom = --safeB: the TASKBAR RESERVE.  The kiosk window covers the
+     whole screen but Windows keeps the taskbar on top of it whenever the window
+     loses its full-screen state (era-hub/server.js:327-339, the cold-launch
+     race; or a second same-profile launch, which Chromium answers by ignoring
+     --kiosk).  We cannot detect that from inside the page — innerHeight reads
+     the same either way — so the letters simply never use the bottom strip.
+     The TILE still bleeds to the true bottom edge, so the gaze target keeps its
+     full height and the full-bleed row is unchanged; only the glyph lifts. */
   .letter{flex:0 0 var(--letterSize,300px); width:var(--letterSize,300px); height:100%;
           border-radius:0; background:var(--card);
           border:0; border-top:3px solid var(--line);
           display:flex; align-items:center; justify-content:center;
+          padding-bottom:var(--safeB,44px);
           font-size:var(--letterFont,180px); font-weight:700; color:var(--ink)}
   #tray .letter + .letter{border-left:3px solid var(--line)}
   .letter.vowel{color:var(--vowel); background:var(--vowel-wash)}
@@ -60,7 +89,7 @@
            background:var(--ink); border-top:3px solid var(--line); border-left:3px solid var(--line)}
 
   /* ---------- word slots ---------- */
-  #slots{display:flex; gap:var(--slotGap,16px); min-height:150px; align-items:center}
+  #slots{display:flex; gap:var(--slotGap,16px); min-height:min(150px,13.9vh); align-items:center}
   .slot{width:var(--slotW,130px); height:calc(var(--slotW,130px)*1.15); border-radius:16px; border:3px dashed #B9C6C3;
         background:#FDFEFD; display:flex; align-items:center; justify-content:center;
         font-size:calc(var(--slotW,130px)*0.72); font-weight:700}
@@ -165,12 +194,14 @@
   #endNote{font-size:40px}
 
   @media (prefers-reduced-motion: reduce){ .confetti{display:none} }
-  /* Short kiosks (the I-13 is 1280x720 CSS px): the prompt takes one line and
-     the pill sits at the 74px floor so the word stacks have room to grow
-     (dad 9/3 photo: "tan" on top of the column). Wider screens are untouched. */
+  /* Short kiosks (the I-13 is 1280x720 CSS px): the pill sits at the 74px floor
+     so the word stacks have room to grow (dad 9/3 photo: "tan" on top of the
+     column). Wider screens are untouched.
+     The prompt's own overrides that used to live here are GONE (dad 9/6): they
+     PUSHED the title back UP to 44px on exactly the screens that could not
+     afford it, and left the 46px subtitle bigger than the title. The vh caps in
+     the layout shell above do the same job continuously and correctly. */
   @media (max-height: 800px){
-    #prompt{min-height:0; padding:10px 200px 4px}
-    #prompt .text{font-size:44px}
     #sortword{font-size:74px; padding:8px 40px}
   }
 </style>
