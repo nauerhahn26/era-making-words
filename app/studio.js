@@ -21,6 +21,8 @@
 "use strict";
 // lib/contract.js values via the index.html shim — the whitelist, not copies.
 const EC = window.EllieContract.CONTRACT;
+// lib/doorbar.js via the same shim — the shared 🚪/💬 strip all five apps wear.
+const EB = window.EllieDoorBar;
 
 // ---------- state ----------
 const S = {
@@ -57,7 +59,32 @@ function log(event, detail) {
 }
 
 // ---------- speech (shared layer: ElevenLabs via server, Windows fallback) ----------
+// PAUSED MEANS SILENT (9/17, T7 review). Speech.stop() is a barge-in, not a
+// mute: it bumps the shared layer's generation and kills what is QUEUED
+// (era-core speech.js:152), but a cancelled utterance RESOLVES (sayLocal
+// resolves on cancel) — so every chained prompt in this file
+// (`await say(op); await say(sentenceFor(w))`, startMakeWord; checkAttempt; the
+// recap; the secret reveal) simply marched on to its NEXT line with a fresh
+// generation and spoke it at full volume. After a 💬 that means talking straight
+// over her while the kiosk sits minimized under TD Snap — the one thing the door
+// exists to prevent. The same hole was open under the partner's ⏸.
+// So the app's own door is here, on the way OUT: while S.paused, nothing this
+// file wants to say reaches the speech layer at all. Resolving (rather than
+// hanging) keeps every awaiting chain unwound, exactly as a cancel does.
 function say(text, opts) {
+  if (S.paused) return Promise.resolve();
+  return sayNow(text, opts);
+}
+// THE ONE EXCEPTION, and the reason it is safe (dad 9/17): an ADULT PRESS.
+// The door above exists to silence CHAINED prompts — the lines nobody asked
+// for, which the barge-in cannot stop because a cancelled utterance resolves and
+// the next await simply runs. A grown-up pressing 🔁 while they hold the ⏸ is
+// the exact opposite: it is a request, made by the only person in the room who
+// can see the screen, and answering it with silence reads as a broken button.
+// A 💬 pause cannot reach here — that kiosk is minimized under TD Snap and there
+// is no 🔁 to press. So this bypass belongs to repeatPrompt() ALONE (the partner
+// strip's 🔁 and her #replay tile) and must never be given to anything chained.
+function sayNow(text, opts) {
   if (!S.tts || !window.Speech) return Promise.resolve();
   return Speech.say(text, (opts && opts.kind) || "long");
 }
@@ -105,6 +132,12 @@ function show(which) {
   if (which === "stage") els.stage.style.display = "flex";
   else if (which) $(which).classList.add("show");
   $("replay").style.display = which === "stage" ? "flex" : "none";
+  // the stage is HERS: the adult's lesson bar goes with it here, not only on
+  // the session-start path (9/17: the hub's invariant audit enters a lesson
+  // through show("stage") and found the 🔊 replay tile occluded by #adultBar —
+  // both now sit at the same offset under the shared bar, where on master a
+  // 6px difference happened to leave the tile's centre 1px clear).
+  if (which === "stage") $("adultBar").style.display = "none";
   const t = document.getElementById("tally"); if (t && which !== "stage") t.style.display = "none";
 }
 
@@ -125,7 +158,9 @@ function buildTray(letters, withBackspace) {
   if (withBackspace) {
     const b = document.createElement("div");
     b.className = "letter dwell small"; b.id = "backspace";
-    b.textContent = "⌫"; b.setAttribute("data-dwell-ms", String(EC.holds.backspace));
+    // no data-dwell-ms: backspace holds HER dwell like every other control
+    // (dad 9/17 — only the bar's two doors off the screen hold 2x).
+    b.textContent = "⌫";
     b.addEventListener("click", unpickLetter);
     els.tray.appendChild(b);
   }
@@ -142,7 +177,7 @@ function buildTray(letters, withBackspace) {
 // collected words STACK above its head. One implementation, two screens — so the
 // two sorting-style screens never drift apart. Returns { heads[], stacks[] }
 // index-aligned to `labels`; caller maps its own column indices onto them.
-function buildChoiceTray(labels, onPick, holdMs) {
+function buildChoiceTray(labels, onPick) {
   const old = document.getElementById("colStacks"); if (old) old.remove();
   layoutTray(labels.length);
   els.tray.innerHTML = "";
@@ -154,7 +189,8 @@ function buildChoiceTray(labels, onPick, holdMs) {
   labels.forEach((label, k) => {
     const h = document.createElement("div");
     h.className = "letter dwell sorthead";
-    h.setAttribute("data-dwell-ms", String(holdMs || 1600));   // a pick is a decision
+    // no data-dwell-ms: a pick is a decision, but it is a decision ON this
+    // screen — her dwell, like every tile (dad 9/17).
     h.textContent = label;
     if (label.length === 1 && "aeiou".includes(label.toLowerCase())) h.classList.add("vowel");
     // Word heads (rhyme sorts) fit their cell: the word's own width, or half the
@@ -355,7 +391,14 @@ function setVar(k, v) { document.documentElement.style.setProperty(k, v + "px");
 // was squeezed (dad 9/6 photos). vs() replays the original's 1080-tall
 // proportions in whatever height we actually get; at 1080 it is exactly 1.
 const DESIGN_H = 1080;
-function vs() { return Math.min(1, window.innerHeight / DESIGN_H); }
+// The height the APP actually gets. The shared door bar (era-core lib/doorbar.js)
+// takes a slim strip off the top — #stage and every .screen start at --bar-h — so
+// the rows vs() scales measure what is LEFT, never the raw viewport. barHeight()
+// is a pure function of innerHeight, so this answers correctly even before the
+// bar has mounted. At 1920x1080 the strip is 97px: 983 usable.
+// (layoutTray's band is the deliberate exception — see the note there.)
+function usableH() { return window.innerHeight - EB.barHeight(window.innerHeight); }
+function vs() { return Math.min(1, usableH() / DESIGN_H); }
 
 // TASKBAR RESERVE (CSS px). Windows keeps the taskbar (~40 CSS px at every
 // display scaling) drawn over the kiosk window whenever the window loses its
@@ -373,6 +416,16 @@ const SAFE_BOTTOM = (window.StudioConfig && window.StudioConfig.safeBottom) ?? 4
 // parks the cursor at the bottom-right corner on track loss — never a target).
 const TRAY_BAND = EC.sizes.trayBand, PARK_UNITS = EC.sizes.parkUnits;
 function layoutTray(nUnits) {
+  // THE BAND IS 30% OF THE VIEWPORT, not of usableH() — the one vertical size in
+  // this file that the door bar must NOT shrink (T7, 9/17). The bar is a strip at
+  // the TOP; the letter row is flush to the BOTTOM edge, so the band loses nothing
+  // to it geometrically, and index.html's own rule stands: "the squeeze may only
+  // ever come out of the empty middle (#work)". Measured: taking the bar off first
+  // costs her band 18px on the 1280x672 kiosk (202 -> 184), which drops the
+  // backspace tile to 99x184 = 18216 px² — under the 18700 px² target-area floor
+  // the layout suite has enforced since 9/6, for no fit reason at all (#work still
+  // has 324px of empty space at that viewport). vs() below DOES take the bar off:
+  // the rows it scales live in the middle, which is exactly what the bar costs.
   const bandH = Math.round(window.innerHeight * TRAY_BAND);
   const unit = Math.floor(window.innerWidth / (nUnits + PARK_UNITS));
   setVar("--trayH", bandH);
@@ -641,11 +694,11 @@ async function makeRecapThenBreak() {
   confetti(14);
   els.bigRow.innerHTML = "";
   const go = document.createElement("div");
-  go.className = "action primary dwell"; go.setAttribute("data-dwell-ms", String(EC.holds.answer));
+  go.className = "action primary dwell";
   go.textContent = "Keep going ▶";
   go.addEventListener("click", () => { if (window.Speech) Speech.stop(); log("break_choice", { choice: "go" }); if (S.part === "make") return endLesson(); show("stage"); startSort(); });
   const rest = document.createElement("div");
-  rest.className = "action dwell"; rest.setAttribute("data-dwell-ms", String(EC.holds.answer));
+  rest.className = "action dwell";
   rest.textContent = "Rest 🌙";
   rest.addEventListener("click", async () => {
     if (window.Speech) Speech.stop();          // barge-in: cut the recap narration NOW
@@ -682,11 +735,11 @@ async function revealSecret(supported) {
   // Her choice, not a timer (the reveal is the natural break point):
   els.bigRow.innerHTML = "";
   const go = document.createElement("div");
-  go.className = "action primary dwell"; go.setAttribute("data-dwell-ms", String(EC.holds.answer));
+  go.className = "action primary dwell";
   go.textContent = "Keep going ▶";
   go.addEventListener("click", () => { if (window.Speech) Speech.stop(); log("break_choice", { choice: "go" }); if (S.part === "make") return endLesson(); show("stage"); startSort(); });
   const rest = document.createElement("div");
-  rest.className = "action dwell"; rest.setAttribute("data-dwell-ms", String(EC.holds.answer));
+  rest.className = "action dwell";
   rest.textContent = "Rest 🌙";
   rest.addEventListener("click", async () => {
     if (window.Speech) Speech.stop();
@@ -819,8 +872,6 @@ async function chooseSortType() {
     const mk = (label, type) => {
       const d = document.createElement("div");
       d.className = "action dwell" + (type === native ? " primary" : "");
-      // deliberate: reading a card must not select it (gaze passes over these to read)
-      d.setAttribute("data-dwell-ms", String(EC.holds.exit));
       d.textContent = label + (type === native ? " ★" : "");
       d.addEventListener("click", () => { if (window.Speech) Speech.stop(); log("sort_type_choice", { type }); res(type); });
       return d;
@@ -858,7 +909,7 @@ async function startSort(forTransfer) {
     return isFirstLetterSort() ? col[0][0].toLowerCase() : col[0];
   });
   $("stage").classList.add("choosing");   // pill rides high; stacks own the field
-  const built = buildChoiceTray(labels, (k) => onHeadActivate(liveIdxs[k]), 1600);
+  const built = buildChoiceTray(labels, (k) => onHeadActivate(liveIdxs[k]));
   headEls = built.heads;
   liveIdxs.forEach((idx, k) => { colElByIdx[idx] = built.stacks[k]; });
   // words that head a column nothing sorts into: small reference chips, not giant targets
@@ -1023,7 +1074,6 @@ async function chooseTransferType() {
     const mk = (label, type) => {
       const d = document.createElement("div");
       d.className = "action dwell" + (type === native ? " primary" : "");
-      d.setAttribute("data-dwell-ms", String(EC.holds.exit));
       d.textContent = label + (type === native ? " ★" : "");
       d.addEventListener("click", () => { if (window.Speech) Speech.stop(); log("transfer_type_choice", { type }); res(type); });
       return d;
@@ -1068,7 +1118,7 @@ async function startTransfer() {
     els.bigSub.textContent = hint;
     els.bigRow.innerHTML = "";
     const done = document.createElement("div");
-    done.className = "action primary dwell"; done.setAttribute("data-dwell-ms", String(EC.holds.answer));
+    done.className = "action primary dwell";
     done.textContent = "All done ▶";
     done.addEventListener("click", () => { show("stage"); endLesson(); });
     els.bigRow.appendChild(done);
@@ -1105,7 +1155,7 @@ async function startFirstLetterTransfer(wordList) {
   // pick-a-column implementation with sort (buildChoiceTray).
   const letters = FL.letters;
   $("stage").classList.add("choosing");
-  const built = buildChoiceTray(letters, (k) => flPick(k), 1600);
+  const built = buildChoiceTray(letters, (k) => flPick(k));
   headEls = built.heads; colElByIdx = {};
   letters.forEach((L, idx) => { colElByIdx[idx] = built.stacks[idx]; });
   els.promptText.textContent = "New words! Which letter do they start with?";
@@ -1274,12 +1324,14 @@ $("pPause").addEventListener("click", () => {
   $("pPause").textContent = S.paused ? "▶ resume" : "⏸ pause";
   log("partner", { action: S.paused ? "pause" : "resume" });
 });
+// sayNow(), not say(): a 🔁 IS the press, so it speaks through a partner's ⏸ —
+// see the note beside sayNow. Nothing else in this file may use it.
 function repeatPrompt() {
-  if (S.phase === "make") { const { op } = alignment(S.wordIdx > 0 ? S.lesson.make[S.wordIdx - 1] : null, currentWord()); say(op); say(sentenceFor(currentWord())); }
-  else if (S.phase === "sort") say(`Where does ${currentSortWord()} belong?`);
-  else if (S.phase === "transfer") { const m = modelFor(currentTransferWord()); say(m ? `Spell ${currentTransferWord()}. It rhymes with ${m}.` : `Spell ${currentTransferWord()}.`); }
-  else if (S.phase === "secret") say("The secret word uses all of your letters. It starts with " + secretWord()[0] + ".");
-  else say("Take your time.");
+  if (S.phase === "make") { const { op } = alignment(S.wordIdx > 0 ? S.lesson.make[S.wordIdx - 1] : null, currentWord()); sayNow(op); sayNow(sentenceFor(currentWord())); }
+  else if (S.phase === "sort") sayNow(`Where does ${currentSortWord()} belong?`);
+  else if (S.phase === "transfer") { const m = modelFor(currentTransferWord()); sayNow(m ? `Spell ${currentTransferWord()}. It rhymes with ${m}.` : `Spell ${currentTransferWord()}.`); }
+  else if (S.phase === "secret") sayNow("The secret word uses all of your letters. It starts with " + secretWord()[0] + ".");
+  else sayNow("Take your time.");
   S.lastPromptAt = Date.now();   // a replay counts as a fresh prompt (nudge clock resets)
 }
 $("pRepeat").addEventListener("click", () => { log("partner", { action: "repeat" }); repeatPrompt(); });
@@ -1293,9 +1345,20 @@ $("pSkip").addEventListener("click", () => {          // phase-aware (review P1-
 });
 $("pEasier").addEventListener("click", () => tuneDwell(+200));
 $("pFaster").addEventListener("click", () => tuneDwell(-200));
+// The shared 🚪/💬 strip, declared HERE because the partner strip above reaches
+// for it and the mount is further down the file (see "the door bar"). A `const`
+// at the mount made every earlier reference a TDZ throw waiting for the one
+// grown-up who tunes her dwell before the bar exists; this way a tune that early
+// is simply a no-op, and /settings hands the doors her real hold moments later.
+let doorBar = null;
 function tuneDwell(d) {
   const ms = Math.max(EC.holds.floor, Math.min(EC.holds.tuneMax, (window.Dwell ? Dwell.config.ms : 1200) + d));
   if (window.Dwell) Dwell.setMs(ms);
+  // ...and the two doors with it. Dad's ruling (9/17, spec §5.1): the doors are
+  // ALWAYS 2x whatever her dwell is right now — not 2x whatever /settings last
+  // said. Moving only the engine left a partner who had slowed her down holding
+  // doors that were, relative to every other target, suddenly the fast ones.
+  doorBar?.setDwell(ms);
   log("partner", { action: "dwell", ms });
 }
 $("pEnd").addEventListener("click", () => { log("partner", { action: "end" }); endLesson(); });
@@ -1330,19 +1393,71 @@ document.querySelectorAll(".abtn.part").forEach(b => {
   });
 });
 
-// ---------- the door ----------
-$("door").addEventListener("click", async () => {
-  log("door", { phase: S.phase });
-  await say("Okay — all done for now. Bye bye!");
-  // EXIT DOOR (phase 4.1): the hub decides where the door goes (Settings,
-  // dad 9/3: TD Snap or New ERA). "closed" = ERAgaze took the screen and this
-  // kiosk is closing; anything else (New ERA chosen, or no engine here) =
-  // back to the hub's home in this window.
-  let action = "home";
-  try { action = (await (await fetch("/kiosk/exit", { method: "POST" })).json()).action; } catch {}
-  if (action === "closed") return;
-  location.href = "/home/";
+// ---------- the door bar (era-core lib/doorbar.js) ----------
+// One strip, two doors, shared by all five apps. Mounted HERE, at script top
+// level, not inside boot(): the board's 9/3 rule is a door from the FIRST PAINT,
+// and boot() awaits lessons.json before it can do anything. /settings arrives
+// later and hands the bar her real dwell (2x on both doors) and the 💬.
+//
+// 🚪 onLeave is the old $("door") handler minus the goodbye. The spoken "bye
+// bye" is gone on purpose (spec §5): the 💬's fall-through leg IS this handler,
+// and a pause that quietly fails must not make her sit through a farewell before
+// the screen changes. Speech.stop() first — barge-in, like every other action.
+// The POST /kiosk/exit round trip and the /home/ fallback now live in the bar.
+//
+// S.paused HAS ANOTHER OWNER (T7 review): the partner's ⏸ (:1291) sets the same
+// flag, disables the engine and relabels its button. A bar that cleared the flag
+// unconditionally on the way back handed the lesson straight back to her —
+// running, with Dwell still off and the partner's button still reading
+// "▶ resume" — the moment she touched 💬 during a grown-up's pause. So the bar
+// LATCHES: it gives back exactly the state it took, and the partner's ⏸ stays
+// the partner's to lift.
+let pausedBeforeTalk = false;
+doorBar = EB.mountDoorBar(document.body, {
+  onLeave: () => {
+    if (window.Speech) Speech.stop();
+    log("door", { phase: S.phase });
+  },
+  // 💬 PAUSE TO TALK (dad 9/17): she is mid-lesson and wants to SAY something.
+  // Stop talking and freeze — S.paused already gates pickLetter, the nudge
+  // clock and every other handler — but change nothing else: her letters stay
+  // exactly where they are, which is the whole point of pausing in place.
+  onPause: () => {
+    if (window.Speech) Speech.stop();
+    pausedBeforeTalk = S.paused;
+    S.paused = true;
+    log("pause_to_talk", { phase: S.phase, wasPaused: pausedBeforeTalk });
+  },
+  // Back from TD Snap: nothing to restore, the lesson is still on screen — and
+  // the pause flag goes back to whoever held it before the 💬, not to false.
+  onResume: () => {
+    S.paused = pausedBeforeTalk;
+    log("resume_from_talk", { phase: S.phase, stillPaused: S.paused });
+  },
 });
+// The handle, published on purpose. studio.js is a CLASSIC script, so the `const`
+// above is a global-scope binding and not a property of window — the suites that
+// reached it through page.evaluate were relying on that accident. One named hook
+// instead: tests (and a grown-up at a dev console) drive the bar through this.
+window.__doorBar = doorBar;
+
+// The strip is 9% of the viewport, and NOTHING recomputed it. After a viewport
+// change (a kiosk that lost its full-screen state, a scale change, the QA VM)
+// the bar kept its mount-time height and --bar-h with it, while usableH()/vs()
+// (:369) read the LIVE innerHeight — so the offset her chrome sits at and the
+// scale her rows are drawn to disagreed. The Board (board.js:186) and the Pencil
+// (pencil.js:554) have re-sized on resize since the bar landed; this is the same
+// line, and the bar is the only thing here that caches a measurement.
+window.addEventListener("resize", () => doorBar.sizeBar());
+
+// /settings landed: her dwell drives the engine AND the bar's two doors (2x),
+// and the 💬 exists only where there is a TD Snap to go and talk in.
+function applySettings(st) {
+  if (!st) return;
+  if (st.dwellMs && window.Dwell) Dwell.setMs(st.dwellMs);
+  if (st.dwellMs) doorBar.setDwell(st.dwellMs);
+  doorBar.setPause(st.pauseGoes === "tdsnap");
+}
 
 // ---------- confetti ----------
 function confetti(n) { try { window.EllieCelebrate.confetti(n); } catch {} }
@@ -1350,6 +1465,11 @@ function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ---------- boot ----------
 async function boot() {
+  // /settings at BOOT, not only at "Let's play" (T7): the bar is on screen from
+  // the first paint, so its two doors must carry her real hold — and the 💬 must
+  // appear — while she is still looking at the start screen. The start-time
+  // re-fetch below stays: a grown-up may change her dwell between the two.
+  fetch("/settings").then(r => r.json()).then(applySettings).catch(() => {});
   try {
     const [lessonsRes, runwayRes] = await Promise.all([fetch("lessons.json"), fetch("runway.json")]);
     // Lesson content ships separately from the app (see README: bring your
@@ -1406,7 +1526,7 @@ $("btnStart").addEventListener("click", async () => {
   show("stage");
   if (S.part !== "sort" && S.part !== "transfer") buildTray(S.lesson.letters, true);
   const st = await settingsP;
-  if (st.dwellMs && window.Dwell) Dwell.setMs(st.dwellMs);
+  applySettings(st);
   const mode = await initP;
   S.tts = mode !== "off";
   if (!S.tts) { $("ttsWarn").classList.add("show"); log("tts_failed", {}); }

@@ -37,7 +37,21 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(900);
   check('lesson loaded', (await page.textContent('#startSub')).includes('letters'));
   check('rest spot removed (open space rests her eyes)', await page.locator('#rest').count() === 0);
-  check('door long dwell', (await page.getAttribute('#door', 'data-dwell-ms')) === '2400');
+  // The door is the shared bar's now (era-core lib/doorbar.js), and its hold is
+  // NOT a fixed 2400 any more: dad 9/17, the two doors that leave the screen hold
+  // 2x HER dwell and everything else holds her dwell exactly. So ask the hub what
+  // her dwell is and check the door against that — a Settings change of 1200 ->
+  // 900 must move the door to 1800, and this row must move with it.
+  const settings = await page.evaluate(() => fetch('/settings').then(r => r.json()));
+  const wantDoor = String(2 * settings.dwellMs);
+  check('door holds 2x her dwell', (await page.getAttribute('#barDoor', 'data-dwell-ms')) === wantDoor,
+        'dwell=' + settings.dwellMs + ' door=' + (await page.getAttribute('#barDoor', 'data-dwell-ms')));
+  // ...and nothing else does. The old ladder (backspace 1800, answer/exit 2400)
+  // is gone: a tile with no data-dwell-ms inherits the engine's configured dwell.
+  check('her tiles carry no hold of their own',
+        await page.locator('.dwell[data-dwell-ms]:not(#barDoor):not(#barTalk)').count() === 0,
+        JSON.stringify(await page.locator('.dwell[data-dwell-ms]').evaluateAll(
+          els => els.map(e => (e.id || e.className) + '=' + e.dataset.dwellMs))));
 
   console.log('B) bottom-right empty space is safe to rest in');
   await page.mouse.move(1850, 1000, { steps: 4 }); await sleep(900);
@@ -118,12 +132,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.evaluate(() => { if (window.speechSynthesis) speechSynthesis.speak = u => setTimeout(() => u.onend && u.onend(), 0); });
   let exitHits = 0;
   await page.route('**/kiosk/exit', r => { exitHits++; r.fulfill({ status: 200, contentType: 'application/json', body: '{"action":"closed"}' }); });
-  await page.click('#door'); await sleep(700);
+  await page.click('#barDoor'); await sleep(700);
   check('door POSTs /kiosk/exit once', exitHits === 1, 'hits=' + exitHits);
   check('closed: no navigation (kiosk is closing)', /127\.0\.0\.1:8377\/$/.test(page.url()), page.url());
   await page.unroute('**/kiosk/exit');
   await page.route('**/kiosk/exit', r => r.fulfill({ status: 200, contentType: 'application/json', body: '{"action":"home"}' }));
-  await page.click('#door');
+  await page.click('#barDoor');
   await page.waitForURL(/\/home\/?$/, { timeout: 8000 }).catch(() => {});
   check('home: door lands on New ERA home', /\/home\/?$/.test(page.url()), page.url());
 
