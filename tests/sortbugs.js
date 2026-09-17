@@ -28,7 +28,12 @@ let pass=0, fail=0; const check=(n,c,x)=>{ if(c){pass++;console.log('  PASS  '+n
       heads: [...document.querySelectorAll('.sorthead')].map(h=>h.textContent),
       seq: sortRemaining() };
   });
-  check('chooser cards deliberate (2400ms — reading ≠ choosing)', a.dwellMs.every(d=>d==='2400'), JSON.stringify(a.dwellMs));
+  // dad 9/17, asked explicitly: "match making words with other dwells". The
+  // chooser cards used to carry a deliberate 2400 ("reading ≠ choosing"), but
+  // that was OUR invented ladder — the field ships one dwell per user and only
+  // the two doors that LEAVE the screen (the bar's 🚪 and 💬) buy extra time.
+  // A card with no data-dwell-ms inherits the engine's configured dwell.
+  check('chooser cards hold her dwell (no hold of their own)', a.dwellMs.every(d=>d===null), JSON.stringify(a.dwellMs));
   check('title matches CHOSEN type (rhyme)', /rhyme/i.test(a.title), a.title);
   check('no method chip (dad 9/3: remove all that text)', !a.chip, '');
   check('word heads, not letters', a.heads.every(h=>h.length>1), JSON.stringify(a.heads));

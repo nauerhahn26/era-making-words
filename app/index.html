@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Making Words</title>
 <link rel="stylesheet" href="lib/tokens.css">
+<link rel="stylesheet" href="lib/doorbar.css">
 <style>
   /* ============================================================
      Making Words Studio — built to Ellie's spec:
@@ -39,7 +40,8 @@
      out of the letter band.  Rule from here on: a stage size is the ORIGINAL's
      1080-tall value, or the same FRACTION of the height we actually got,
      whichever is smaller.  At 1920x1080 every number below is unchanged. */
-  #stage{position:fixed; inset:0; display:flex; flex-direction:column; overflow:hidden}
+  /* `top` after `inset`: the stage starts under the shared door bar, never behind it. */
+  #stage{position:fixed; inset:0; top:var(--bar-h,0px); display:flex; flex-direction:column; overflow:hidden}
   /* flex:0 0 auto on prompt AND tray: the squeeze may only ever come out of the
      empty middle (#work).  Before, both were shrinkable, so a tight screen
      squashed #prompt under its own text (which then overprinted the tiles) and
@@ -109,7 +111,13 @@
             border:3px solid var(--line); display:flex; align-items:center; justify-content:center;
             font-size:calc(var(--slotW,130px)*0.6); font-weight:700; color:var(--ink)}
 
-  /* sort word-stacks: each column's sorted words float above its bottom-row head */
+  /* sort word-stacks: each column's sorted words float above its bottom-row head.
+     No `top:var(--bar-h)` here, unlike #stage and .screen: this overlay draws
+     nothing of its own and every .colstack inside it is position:FIXED with a
+     `bottom:` (studio.js buildChoiceTray), so the children are laid out against
+     the viewport and the box's own top edge has no effect on anything. Keeping
+     it only made the layout suite's "under the bar" row look like it covered the
+     stacks when it could not fail; the suite measures .colstack/.colword now. */
   #colStacks{position:fixed; inset:0; pointer-events:none; z-index:4}
   .colstack{position:fixed; display:flex; flex-direction:column-reverse; align-items:center; gap:var(--colGap,10px)}
   /* --colFont is set by fitStacks() (studio.js): on a 1280x720 kiosk a stack of
@@ -142,14 +150,18 @@
   .action.primary{background:var(--teal); border-color:var(--teal-deep); color:#fff}
   #backspace{border-radius:0; font-size:calc(var(--letterFont,180px)*0.55); color:#5A6A70}
 
-  /* the door — top-left, deliberate long dwell, always present */
-  #door{position:fixed; left:26px; top:26px; width:170px; height:110px; border-radius:18px;
-        background:var(--card); border:3px solid var(--line); z-index:50;
-        display:flex; align-items:center; justify-content:center;
-        font-size:56px; font-weight:650; color:#5A6A70}
+  /* ---------- the shared door bar (era-core lib/doorbar.js + doorbar.css) ----------
+     The studio's own 170x110 #door tile is GONE (9/17): all five apps wear one
+     strip carrying 🚪 and 💬. doorbar.css draws it; the only thing Making Words
+     adds is WHERE it sits. Every screen here is a fixed full-bleed overlay
+     (#stage, .screen, #colStacks), so the strip is fixed at the top too and each
+     overlay starts at --bar-h — the custom property mountDoorBar() sets on the
+     mount (document.body) and re-sets on every sizeBar(). The fallback 0px keeps
+     the page sane for the few ms before studio.js mounts the bar. */
+  .msgbar{position:fixed; left:0; top:0; z-index:65}
 
   /* partner-facing TTS failure banner (she never needs to read this) */
-  #ttsWarn{display:none; position:fixed; top:0; left:50%; transform:translateX(-50%);
+  #ttsWarn{display:none; position:fixed; top:var(--bar-h,0px); left:50%; transform:translateX(-50%);
            background:#B23A48; color:#fff; font-size:20px; padding:8px 22px;
            border-radius:0 0 12px 12px; z-index:70}
   #ttsWarn.show{display:block}
@@ -169,7 +181,7 @@
               z-index:1; background:transparent}  /* under content: real buttons win where they overlap */
 
   /* screens */
-  .screen{position:fixed; inset:0; display:none; flex-direction:column;
+  .screen{position:fixed; inset:0; top:var(--bar-h,0px); display:none; flex-direction:column;
           align-items:center; justify-content:center; gap:36px; background:var(--paper); z-index:40;
           padding:32px 48px 56px}   /* bottom padding: choices never kiss the edge/park corner */
   .screen.show{display:flex}
@@ -219,8 +231,8 @@
 
 <!-- ======== persistent chrome ======== -->
 <div id="ttsWarn">⚠ Voice not working — words are shown on screen. Check Windows audio/TTS.</div>
-<div id="door" class="dwell" data-dwell-ms="2400" data-dwell-say="door" aria-label="door"><svg viewBox="0 0 24 24" width="60" height="60" fill="none" stroke="#5A6A70" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h7"/><path d="M13 3l4 1.5v15L13 21z" fill="#EDE3D8" stroke="#B98A5E"/><circle cx="14.5" cy="12" r="0.9" fill="#B98A5E" stroke="none"/><path d="M19 12h4m0 0l-2-2m2 2l-2 2"/></svg></div>
-<div id="replay" class="dwell" data-dwell-ms="1600" style="display:none; position:fixed; right:26px; top:26px;
+<!-- the 🚪 door and the 💬 talk door are the shared bar's (studio.js mounts it) -->
+<div id="replay" class="dwell" style="display:none; position:fixed; right:26px; top:calc(var(--bar-h,0px) + 12px);
      width:170px; height:110px; border-radius:18px; background:var(--card); border:3px solid var(--line);
      z-index:50; align-items:center; justify-content:center; font-size:52px">🔊</div>
 
@@ -237,7 +249,7 @@
 </div>
 
 <!-- ======== start screen ======== -->
-<div id="adultBar" style="position:fixed; right:20px; top:20px; z-index:55; display:flex; gap:10px;
+<div id="adultBar" style="position:fixed; right:20px; top:calc(var(--bar-h,0px) + 12px); z-index:55; display:flex; gap:10px;
      background:rgba(23,39,46,.92); border-radius:14px; padding:10px 14px; align-items:center">
   <button class="abtn" id="aPrev">◀</button>
   <span id="aLesson" style="color:#DFE9E7; font-size:22px; min-width:150px; text-align:center">…</span>
@@ -258,7 +270,7 @@
   <div class="title" id="startTitle">Making Words</div>
   <div class="subtitle" id="startSub">…loading her lesson…</div>
   <div class="row">
-    <div class="action primary dwell" data-dwell-ms="1600" id="btnStart" data-dwell-say="let's play">Let&rsquo;s play! ▶</div>
+    <div class="action primary dwell" id="btnStart" data-dwell-say="let's play">Let&rsquo;s play! ▶</div>
   </div>
 </div>
 
@@ -289,11 +301,13 @@
 <div id="sEnd" class="screen">
   <div class="title">How was that?</div>
   <!-- rating tiles are HER gaze choices: label at the 74px floor, emoji beside
-       it, one tile per row so all three fit a 1280x720 kiosk (dad 9/3). -->
+       it, one tile per row so all three fit a 1280x720 kiosk (dad 9/3).
+       No data-dwell-ms: they hold HER dwell, like everything that is not a door
+       off the screen (dad 9/17 — "match making words with other dwells"). -->
   <div class="row">
-    <div class="action dwell" data-dwell-ms="1600" data-rate="easy"><span>😴</span>too easy</div>
-    <div class="action dwell" data-dwell-ms="1600" data-rate="right"><span>😊</span>just right</div>
-    <div class="action dwell" data-dwell-ms="1600" data-rate="hard"><span>😮‍💨</span>tricky</div>
+    <div class="action dwell" data-rate="easy"><span>😴</span>too easy</div>
+    <div class="action dwell" data-rate="right"><span>😊</span>just right</div>
+    <div class="action dwell" data-rate="hard"><span>😮‍💨</span>tricky</div>
   </div>
   <div class="subtitle" id="endNote"></div>
 </div>
@@ -301,10 +315,12 @@
 <script type="module">
   // contract shim (see lib/contract.js): classic app script stays classic so the
   // test harness keeps reaching its globals; module runs first in defer order.
-  import { CONTRACT, holdFor, holdForDoor } from "./lib/contract.js";
+  import { CONTRACT, holdFor, holdForExit } from "./lib/contract.js";
   import { confetti } from "./lib/celebrate.js";
-  window.EllieContract = { CONTRACT, holdFor, holdForDoor };
+  import { mountDoorBar, barHeight } from "./lib/doorbar.js";
+  window.EllieContract = { CONTRACT, holdFor, holdForExit };
   window.EllieCelebrate = { confetti };
+  window.EllieDoorBar = { mountDoorBar, barHeight };
 </script>
 <script src="dwell.js"></script>
 <script src="speech.js"></script>
