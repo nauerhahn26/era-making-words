@@ -132,6 +132,12 @@ function show(which) {
   if (which === "stage") els.stage.style.display = "flex";
   else if (which) $(which).classList.add("show");
   $("replay").style.display = which === "stage" ? "flex" : "none";
+  // the stage is HERS: the adult's lesson bar goes with it here, not only on
+  // the session-start path (9/17: the hub's invariant audit enters a lesson
+  // through show("stage") and found the 🔊 replay tile occluded by #adultBar —
+  // both now sit at the same offset under the shared bar, where on master a
+  // 6px difference happened to leave the tile's centre 1px clear).
+  if (which === "stage") $("adultBar").style.display = "none";
   const t = document.getElementById("tally"); if (t && which !== "stage") t.style.display = "none";
 }
 
