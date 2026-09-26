@@ -1477,7 +1477,7 @@ async function boot() {
     // not a server problem, so say what it really is and where to go next.
     if (lessonsRes.status === 404) {
       $("startTitle").textContent = "One more step!";
-      $("startSub").textContent = "This download doesn't include lesson content. Grown-ups: add your family's lessons.json to the app's public folder, then reload. Details at neweracommunications.org.";
+      $("startSub").textContent = "This download doesn't include lesson content. Grown-ups: add your family's lessons.json to the app's public folder, then reload. Details at ourerafoundation.org/communications.";
       $("btnStart").style.display = "none";
       log("boot_no_lessons", {});
       return;
