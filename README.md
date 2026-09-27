@@ -2,7 +2,7 @@
 
 Making Words for eye-gaze: a guided word-building literacy activity (make → sort
 → transfer, secret-word ritual, two-strike reveal) driven entirely by gaze dwell
-or touch. Part of the New ERA Communications family; runs as a module of
+or touch. Part of the Our Era Communication Tools family; runs as a module of
 era-hub and consumes the era-core engines (dwell, speech, contract).
 
 License: MPL-2.0 (code). Lesson content: `content/lessons.json` ships with the
