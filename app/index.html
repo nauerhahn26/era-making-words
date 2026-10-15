@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Making Words</title>
+<link rel="stylesheet" href="lib/tokens.css">
+<link rel="stylesheet" href="lib/doorbar.css">
+<style>
+  /* ============================================================
+     Making Words Studio — built to Ellie's spec:
+     text ≥32pt everywhere she reads; letters are HUGE;
+     minimum choices on screen; black rest spot (bottom-right,
+     same corner ERAgaze parks in); flat navigation; no symbols.
+     Vowels tinted (book convention); no buzzers, no red X, ever.
+     ============================================================ */
+  :root{
+    --ink:var(--color-ink); --paper:var(--color-paper); --card:#FFFFFF; --line:#D8E0DE;
+    --teal:var(--color-primary); --teal-deep:#0B4E58; --teal-wash:#E4EFEF;
+    --vowel:var(--color-vowel); --vowel-wash:#FBEDE5;   /* vowels in their own color — book convention */
+    --good:var(--color-success); --good-wash:#E5F0EA;
+    --font: "Segoe UI", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box; user-select:none}
+  html,body{height:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--font);
+       overflow:hidden; cursor:default}
+
+  /* ---------- layout shell ----------
+     VERTICAL FIT (dad 9/6, the I-13 photos: the subtitle sitting on the tile
+     row, the letter bar sliced off under the taskbar).  The original studio was
+     always launched with --force-device-scale-factor=1
+     (aac-board-builder/aac-studio/install/windows-device.ps1:50, "scale forced
+     so her layout never shrinks"), so it always drew into a 1920x1080 CSS
+     viewport and every fixed px below was a small slice of the screen.  The
+     hub's kiosk line (era-hub/tools/build-payload.sh:156) does not pass that
+     flag, so the same 13.3" panel at Windows 150% scaling reports 1280x720 CSS
+     px — every fixed px suddenly costs 1.5x the screen.  The prompt block then
+     outgrew its row and bled into the tiles, and flexbox took the difference
+     out of the letter band.  Rule from here on: a stage size is the ORIGINAL's
+     1080-tall value, or the same FRACTION of the height we actually got,
+     whichever is smaller.  At 1920x1080 every number below is unchanged. */
+  /* `top` after `inset`: the stage starts under the shared door bar, never behind it. */
+  #stage{position:fixed; inset:0; top:var(--bar-h,0px); display:flex; flex-direction:column; overflow:hidden}
+  /* flex:0 0 auto on prompt AND tray: the squeeze may only ever come out of the
+     empty middle (#work).  Before, both were shrinkable, so a tight screen
+     squashed #prompt under its own text (which then overprinted the tiles) and
+     stole 34px off the letter band. */
+  #prompt{min-height:min(120px,11.12vh); flex:0 0 auto;
+          display:flex; align-items:center; justify-content:center;
+          padding:min(18px,1.7vh) 220px min(6px,0.6vh); text-align:center}
+  #prompt .text{font-size:min(52px,4.82vh); font-weight:650; line-height:1.15; text-wrap:balance}
+  /* ≥32pt floor: 46px = 34.5pt at the design viewport, and 4.26vh keeps that
+     same PHYSICAL size on a scaled-down viewport of the same panel. */
+  #prompt .sub{font-size:min(46px,4.26vh); color:#5A6A70; font-weight:500}
+  #work{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; align-items:center;
+        justify-content:center; gap:min(28px,2.6vh); padding:0 40px}
+  /* choosing phases (sort / first-letter transfer): the word pill + method chip
+     ride HIGH, just under the prompt — the lower field belongs to the growing
+     word stacks (dad 7/28: "elevate the word so you don't run out of space") */
+  #stage.choosing #work{justify-content:flex-start; padding-top:10px; gap:min(20px,1.86vh)}
+  /* Full-bleed keyboard row (dad 7/26): zero gaps, no side margins, flush to the
+     bottom edge; letters split the width evenly; Bold band = 30% of the screen.
+     The far-right cap is an INERT black park pad — ERAgaze parks the cursor at
+     the bottom-right corner on track loss, and that corner must never be a target. */
+  #tray{height:var(--trayH,324px); flex:0 0 auto; padding:0; display:flex; justify-content:flex-start;
+        align-items:stretch; gap:0; flex-wrap:nowrap; position:relative; z-index:5}
+
+  /* ---------- letter cards (gaze targets) ----------
+     padding-bottom = --safeB: the TASKBAR RESERVE.  The kiosk window covers the
+     whole screen but Windows keeps the taskbar on top of it whenever the window
+     loses its full-screen state (era-hub/server.js:327-339, the cold-launch
+     race; or a second same-profile launch, which Chromium answers by ignoring
+     --kiosk).  We cannot detect that from inside the page — innerHeight reads
+     the same either way — so the letters simply never use the bottom strip.
+     The TILE still bleeds to the true bottom edge, so the gaze target keeps its
+     full height and the full-bleed row is unchanged; only the glyph lifts. */
+  .letter{flex:0 0 var(--letterSize,300px); width:var(--letterSize,300px); height:100%;
+          border-radius:0; background:var(--card);
+          border:0; border-top:3px solid var(--line);
+          display:flex; align-items:center; justify-content:center;
+          padding-bottom:var(--safeB,44px);
+          font-size:var(--letterFont,180px); font-weight:700; color:var(--ink)}
+  #tray .letter + .letter{border-left:3px solid var(--line)}
+  .letter.vowel{color:var(--vowel); background:var(--vowel-wash)}
+  .letter.used{opacity:.25}
+  .letter.small{flex-basis:calc(var(--letterSize,300px)*0.72); width:calc(var(--letterSize,300px)*0.72);
+                height:100%; font-size:calc(var(--letterFont,180px)*0.68)}
+  /* inert park pad: black rest spot capping the row's right end (absorbs px rounding) */
+  #parkPad{flex:1 1 var(--parkW,160px); min-width:var(--parkW,160px); height:100%;
+           background:var(--ink); border-top:3px solid var(--line); border-left:3px solid var(--line)}
+
+  /* ---------- word slots ---------- */
+  #slots{display:flex; gap:var(--slotGap,16px); min-height:min(150px,13.9vh); align-items:center}
+  .slot{width:var(--slotW,130px); height:calc(var(--slotW,130px)*1.15); border-radius:16px; border:3px dashed #B9C6C3;
+        background:#FDFEFD; display:flex; align-items:center; justify-content:center;
+        font-size:calc(var(--slotW,130px)*0.72); font-weight:700}
+  .slot.filled{border-style:solid; border-color:var(--teal); background:var(--teal-wash); color:var(--teal-deep)}
+  .slot.match{border-color:var(--good); background:var(--good-wash); color:var(--good)}
+  /* "still looking" — neutral dashed teal, deliberately NOT the vowel color, never red/orange */
+  .slot.check{border-style:dashed; border-color:var(--teal); background:#FDFEFD; color:var(--teal-deep)}
+  /* RENDERED MISTAKE (dad 7/28): her wrong letters HOLD on screen, calmly marked,
+     while the voice talks about them — never an X, never a buzzer; letters stay hers */
+  .slot.miss{border-style:solid; border-color:#C0564A; background:#F9EAE7; color:#A33F36}
+  .slot.locked{border-color:var(--good); background:var(--good-wash); color:var(--good)}
+
+  /* model word row (compare-and-fix) */
+  #model{display:flex; gap:16px; align-items:center; min-height:0}
+  #model{gap:var(--slotGap,16px)}
+  #model .m{width:var(--slotW,130px); height:calc(var(--slotW,130px)*0.85); border-radius:14px; background:var(--card);
+            border:3px solid var(--line); display:flex; align-items:center; justify-content:center;
+            font-size:calc(var(--slotW,130px)*0.6); font-weight:700; color:var(--ink)}
+
+  /* sort word-stacks: each column's sorted words float above its bottom-row head.
+     No `top:var(--bar-h)` here, unlike #stage and .screen: this overlay draws
+     nothing of its own and every .colstack inside it is position:FIXED with a
+     `bottom:` (studio.js buildChoiceTray), so the children are laid out against
+     the viewport and the box's own top edge has no effect on anything. Keeping
+     it only made the layout suite's "under the bar" row look like it covered the
+     stacks when it could not fail; the suite measures .colstack/.colword now. */
+  #colStacks{position:fixed; inset:0; pointer-events:none; z-index:4}
+  .colstack{position:fixed; display:flex; flex-direction:column-reverse; align-items:center; gap:var(--colGap,10px)}
+  /* --colFont is set by fitStacks() (studio.js): on a 1280x720 kiosk a stack of
+     three 60px words climbs into the current-word pill (dad 9/3, "tan" over the
+     column) - the stacks shrink to the room that is there, never under 40px */
+  .colstack .colword{font-size:var(--colFont,60px); font-weight:650; color:var(--ink); line-height:1.2}
+
+  /* ---------- sort columns ---------- */
+  #cols{display:flex; gap:var(--colGap,34px); align-items:flex-start; justify-content:center;
+        max-width:100vw; padding:0 40px}
+  .col{display:flex; flex-direction:column; gap:14px; align-items:center; min-width:0}
+  .colhead{width:var(--colW,300px); padding:18px 10px; box-sizing:border-box;
+           border-radius:20px; background:var(--card);
+           border:3px solid var(--line); font-size:var(--colFont,60px); font-weight:700; text-align:center}
+  .colword{font-size:calc(var(--colFont,60px)*0.72); font-weight:600; color:#41545B}
+  /* reference chips are READ-ALONG content, not chrome (dad 7/28): floor ≥40px,
+     darker ink — she can actually read what she "also made". */
+  #alsoMade{display:flex; gap:18px; justify-content:center; align-items:center; flex-wrap:wrap;
+            font-size:clamp(44px,3.4vw,56px); font-weight:600; color:#41545B; padding:4px 40px}
+  #alsoMade .chip{background:#EDF1F0; border-radius:12px; padding:6px 20px; color:var(--ink)}
+  #sortword{font-size:clamp(64px,7vw,96px); font-weight:750; padding:16px clamp(30px,4vw,54px);
+            border-radius:24px; background:var(--ink); color:#fff}
+
+  /* ---------- utility gaze targets ---------- */
+  /* contract-sized (7/28, dad): these are ELLIE'S gaze choices — big-tile floor,
+     74px+ text, real separation. Used by Keep going/Rest + transfer choosers. */
+  .action{padding:30px 60px; border-radius:24px; background:var(--card); border:3px solid var(--line);
+          font-size:clamp(74px,5.5vw,88px); font-weight:700; min-height:180px;
+          min-width:clamp(340px,32vw,600px); display:flex; align-items:center; justify-content:center}
+  .action.primary{background:var(--teal); border-color:var(--teal-deep); color:#fff}
+  #backspace{border-radius:0; font-size:calc(var(--letterFont,180px)*0.55); color:#5A6A70}
+
+  /* ---------- the shared door bar (era-core lib/doorbar.js + doorbar.css) ----------
+     The studio's own 170x110 #door tile is GONE (9/17): all five apps wear one
+     strip carrying 🚪 and 💬. doorbar.css draws it; the only thing Making Words
+     adds is WHERE it sits. Every screen here is a fixed full-bleed overlay
+     (#stage, .screen, #colStacks), so the strip is fixed at the top too and each
+     overlay starts at --bar-h — the custom property mountDoorBar() sets on the
+     mount (document.body) and re-sets on every sizeBar(). The fallback 0px keeps
+     the page sane for the few ms before studio.js mounts the bar. */
+  .msgbar{position:fixed; left:0; top:0; z-index:65}
+
+  /* partner-facing TTS failure banner (she never needs to read this) */
+  #ttsWarn{display:none; position:fixed; top:var(--bar-h,0px); left:50%; transform:translateX(-50%);
+           background:#B23A48; color:#fff; font-size:20px; padding:8px 22px;
+           border-radius:0 0 12px 12px; z-index:70}
+  #ttsWarn.show{display:block}
+
+  /* celebration + secret word */
+  #big{font-size:150px; font-weight:800; letter-spacing:.02em; color:var(--teal-deep)}
+  .confetti{position:fixed; width:14px; height:22px; border-radius:4px; z-index:80; pointer-events:none}
+
+  /* partner strip — TOUCH ONLY (not .dwell => gaze can never activate it) */
+  #partner{position:fixed; left:50%; transform:translateX(-50%); bottom:0; z-index:60;
+           background:rgba(23,39,46,.94); border-radius:18px 18px 0 0; padding:10px 16px;
+           display:flex; gap:12px; transition:opacity .3s; opacity:0; pointer-events:none}
+  #partner.show{opacity:1; pointer-events:auto}
+  #partner button{background:#2A3B43; color:#DFE9E7; border:0; border-radius:12px;
+                  font-size:22px; padding:12px 18px; font-family:var(--font)}
+  #partnerTab{position:fixed; left:50%; transform:translateX(-50%); bottom:0; width:220px; height:16px;
+              z-index:1; background:transparent}  /* under content: real buttons win where they overlap */
+
+  /* screens */
+  .screen{position:fixed; inset:0; top:var(--bar-h,0px); display:none; flex-direction:column;
+          align-items:center; justify-content:center; gap:36px; background:var(--paper); z-index:40;
+          padding:32px 48px 56px}   /* bottom padding: choices never kiss the edge/park corner */
+  .screen.show{display:flex}
+  .title{font-size:72px; font-weight:750; text-align:center; text-wrap:balance}
+  .subtitle{font-size:46px; color:#5A6A70; text-align:center; max-width:1000px; line-height:1.35}
+  /* her lesson letters are READING content, not chrome (dad 7/28): floor-size, ink,
+     vowels tinted like the tray (book convention) */
+  #startSub{font-size:min(74px, 3.8vw); color:var(--ink); font-weight:650;
+            white-space:nowrap; max-width:none}   /* one line, scales to fit */
+  #startSub .sv{color:var(--vowel)}
+
+  .row{display:flex; gap:64px; align-items:center; justify-content:center; flex-wrap:wrap}
+  /* End screen: one tile per row, emoji beside the label. On the I-13's
+     1280x720 the old three-abreast tiles wrapped into a stack taller than the
+     screen and slid under the adult bar (dad 9/3: "not enough space for too
+     easy, just right"). Padding-top clears the adult bar; 74px labels kept. */
+  #sEnd{justify-content:flex-start; padding-top:96px; gap:22px}
+  #sEnd .title{font-size:56px}
+  #sEnd .row{flex-direction:column; gap:22px}
+  #sEnd .action{min-height:0; padding:10px 48px; gap:28px; min-width:clamp(520px,50vw,720px); font-size:74px}
+  #sEnd .action span{font-size:72px; line-height:1}
+  #endNote{font-size:40px}
+
+  @media (prefers-reduced-motion: reduce){ .confetti{display:none} }
+  /* Short kiosks (the I-13 is 1280x720 CSS px): the pill sits at the 74px floor
+     so the word stacks have room to grow (dad 9/3 photo: "tan" on top of the
+     column). Wider screens are untouched.
+     The prompt's own overrides that used to live here are GONE (dad 9/6): they
+     PUSHED the title back UP to 44px on exactly the screens that could not
+     afford it, and left the 46px subtitle bigger than the title. The vh caps in
+     the layout shell above do the same job continuously and correctly. */
+  @media (max-height: 800px){
+    #sortword{font-size:74px; padding:8px 40px}
+  }
+</style>
+<script>
+  // Dwell config — starting values per plan (generous; caregiver-tunable live via partner strip)
+  window.DwellConfig = {
+    ms: 1200, graceMs: 400, decayMs: 1000, padPx: 16, rearmPx: 48,
+    audioPreview: false,           // OFF by design: Studio speaks all coaching itself; dwell.js preview
+                                   // would cancel() coaching mid-sentence. Do not enable here.
+    chime: false, bus: "auto", staleMs: 600, color: "#0F7C8A"   // voice confirms everything; beeps read as "electronic"
+  };
+</script>
+</head>
+<body>
+
+<!-- ======== persistent chrome ======== -->
+<div id="ttsWarn">⚠ Voice not working — words are shown on screen. Check Windows audio/TTS.</div>
+<!-- the 🚪 door and the 💬 talk door are the shared bar's (studio.js mounts it) -->
+<div id="replay" class="dwell" style="display:none; position:fixed; right:26px; top:calc(var(--bar-h,0px) + 12px);
+     width:170px; height:110px; border-radius:18px; background:var(--card); border:3px solid var(--line);
+     z-index:50; align-items:center; justify-content:center; font-size:52px">🔊</div>
+
+<div id="partnerTab"></div>
+<div id="partner">
+  <button id="pPause">⏸ pause</button>
+  <button id="pRepeat">🔁 repeat</button>
+  <button id="pSkip">⏭ skip word</button>
+  <button id="pEasier">🐢 dwell +200</button>
+  <button id="pFaster">🐇 dwell −200</button>
+  <button id="pVoice">🎙 voice</button>
+  <button id="pEnd">🏁 end session</button>
+  <button id="pClose">✕</button>
+</div>
+
+<!-- ======== start screen ======== -->
+<div id="adultBar" style="position:fixed; right:20px; top:calc(var(--bar-h,0px) + 12px); z-index:55; display:flex; gap:10px;
+     background:rgba(23,39,46,.92); border-radius:14px; padding:10px 14px; align-items:center">
+  <button class="abtn" id="aPrev">◀</button>
+  <span id="aLesson" style="color:#DFE9E7; font-size:22px; min-width:150px; text-align:center">…</span>
+  <button class="abtn" id="aNext">▶</button>
+  <span style="color:#5A6A70">|</span>
+  <button class="abtn part on" data-part="all">whole</button>
+  <button class="abtn part" data-part="make">make</button>
+  <button class="abtn part" data-part="sort">sort</button>
+  <button class="abtn part" data-part="transfer">transfer</button>
+</div>
+<style>
+  .abtn{background:#2A3B43; color:#DFE9E7; border:0; border-radius:10px; font-size:20px;
+        padding:8px 14px; font-family:var(--font)}
+  .abtn.part.on{background:var(--teal); color:#fff}
+</style>
+
+<div id="sStart" class="screen show">
+  <div class="title" id="startTitle">Making Words</div>
+  <div class="subtitle" id="startSub">…loading her lesson…</div>
+  <div class="row">
+    <div class="action primary dwell" id="btnStart" data-dwell-say="let's play">Let&rsquo;s play! ▶</div>
+  </div>
+</div>
+
+<!-- ======== main stage ======== -->
+<div id="stage" style="display:none">
+  <div id="prompt"><div>
+    <div class="text" id="promptText"></div>
+    <div class="sub" id="promptSub"></div>
+  </div></div>
+  <div id="work">
+    <div id="model"></div>
+    <div id="sortwordWrap"></div>
+    <div id="slots"></div>
+    <div id="cols" style="display:none"></div>
+  </div>
+  <div id="tray"></div>
+</div>
+
+<!-- ======== celebration / secret ======== -->
+<div id="sBig" class="screen">
+  <div class="title" id="bigTitle"></div>
+  <div id="big"></div>
+  <div class="subtitle" id="bigSub"></div>
+  <div class="row" id="bigRow"></div>
+</div>
+
+<!-- ======== rating / end ======== -->
+<div id="sEnd" class="screen">
+  <div class="title">How was that?</div>
+  <!-- rating tiles are HER gaze choices: label at the 74px floor, emoji beside
+       it, one tile per row so all three fit a 1280x720 kiosk (dad 9/3).
+       No data-dwell-ms: they hold HER dwell, like everything that is not a door
+       off the screen (dad 9/17 — "match making words with other dwells"). -->
+  <div class="row">
+    <div class="action dwell" data-rate="easy"><span>😴</span>too easy</div>
+    <div class="action dwell" data-rate="right"><span>😊</span>just right</div>
+    <div class="action dwell" data-rate="hard"><span>😮‍💨</span>tricky</div>
+  </div>
+  <div class="subtitle" id="endNote"></div>
+</div>
+
+<script type="module">
+  // contract shim (see lib/contract.js): classic app script stays classic so the
+  // test harness keeps reaching its globals; module runs first in defer order.
+  import { CONTRACT, holdFor, holdForExit } from "./lib/contract.js";
+  import { confetti } from "./lib/celebrate.js";
+  import { mountDoorBar, barHeight } from "./lib/doorbar.js";
+  window.EllieContract = { CONTRACT, holdFor, holdForExit };
+  window.EllieCelebrate = { confetti };
+  window.EllieDoorBar = { mountDoorBar, barHeight };
+</script>
+<script src="dwell.js"></script>
+<script src="speech.js"></script>
+<script src="studio.js" defer></script>
+</body>
+</html>
