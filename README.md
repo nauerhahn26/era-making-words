@@ -15,5 +15,4 @@ hub's public folder; `runway.json` is optional (lesson order is synthesized).
 
 The shared door bar now offers an independent app lock using era-core’s
 controller and adult passcode UI. Locking stops activity, preserves work and
-keeps exit and communication doors available. Implementation awaits testing
-and has not been released.
+keeps exit and communication doors available. The hub’s app-lock plan records validation and release status.
