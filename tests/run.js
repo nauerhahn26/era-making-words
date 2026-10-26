@@ -7,6 +7,10 @@ function check(name, cond, extra) {
   else { fail++; console.log('  FAIL  ' + name + (extra ? '  [' + extra + ']' : '')); }
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Waits out a condition the routed requests decide: `logs` fills in THIS process
+// (the /log route), so a page-side wait cannot see it. A timeout falls through to
+// the checks, which then say what never arrived.
+const until = async (cond, ms) => { const end = Date.now() + ms; while (!(await cond()) && Date.now() < end) await sleep(50); };
 
 (async () => {
   const browser = await chromium.launch();
@@ -19,22 +23,34 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.route('**/runway', r => r.fulfill({ status: 204, body: '' }));   // never touch the family's real pointer
   await page.route('**/voices', r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ enabled: false, current: '', voices: [] }) }));
   await page.route('**/tts', r => r.fulfill({ status: 503, body: '' }));
+  // Every gaze fire, as it happens: era-core dwell.js dispatches dwell:activate on
+  // the target and then clicks it. A gaze waits for ITS fire, at whatever hold the
+  // app is really running, where it used to sleep a fixed hold plus a margin.
+  await page.addInitScript(() => {
+    window.__fired = [];
+    document.addEventListener('dwell:activate', e => window.__fired.push(e.target));
+  });
   await page.goto('http://127.0.0.1:8377/');
   await page.evaluate(() => { Dwell.set({ ms: 90, graceMs: 500, decayMs: 700 }); });
-  await sleep(900);
+  await page.waitForFunction(() => S.lesson && runwayCfg, null, { timeout: 5000 }).catch(() => {});   // boot loaded the lessons + runway
   await page.evaluate(() => setPointer(1));   // tests always run on lesson 2 (full runway: idx = lesson-1)
-  await sleep(300);
 
+  // holdMs bounds the wait (default her dwell + 1 s); it is never slept out.
   const gaze = async (sel, holdMs) => {
+    const before = await page.evaluate(() => window.__fired.length);
     const b = await page.locator(sel).first().boundingBox();
     await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 5 });
-    await sleep(holdMs || 1100);
+    await page.waitForFunction(([n, s]) => window.__fired.slice(n).some(el => el.matches(s)), [before, sel],
+      { timeout: holdMs || settings.dwellMs + 1000 }).catch(() => {});
   };
   const gazeLetter = async (L, holdMs) => gaze(`.letter[data-letter="${L}"]`, holdMs);
-  const park = async () => { await page.mouse.move(960, 300, { steps: 4 }); await sleep(420); };
+  // Re-arming is by DISTANCE from the fire point (era-core dwell.js rearmPx) and
+  // (960,300) is not a .dwell on the start screen or the stage: the move is the
+  // whole job, no sleep after it.
+  const park = async () => { await page.mouse.move(960, 300, { steps: 4 }); };
+  const attempts = () => logs.filter(l => l.event === 'attempt');
 
   console.log('A) boot + start screen');
-  await sleep(900);
   check('lesson loaded', (await page.textContent('#startSub')).includes('letters'));
   check('rest spot removed (open space rests her eyes)', await page.locator('#rest').count() === 0);
   // The door is the shared bar's now (era-core lib/doorbar.js), and its hold is
@@ -44,6 +60,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // 900 must move the door to 1800, and this row must move with it.
   const settings = await page.evaluate(() => fetch('/settings').then(r => r.json()));
   const wantDoor = String(2 * settings.dwellMs);
+  // boot's own /settings hands the bar her dwell; wait for it to land
+  await page.waitForFunction(w => document.getElementById('barDoor').dataset.dwellMs === w, wantDoor,
+    { timeout: 2000 }).catch(() => {});
   check('door holds 2x her dwell', (await page.getAttribute('#barDoor', 'data-dwell-ms')) === wantDoor,
         'dwell=' + settings.dwellMs + ' door=' + (await page.getAttribute('#barDoor', 'data-dwell-ms')));
   // ...and nothing else does. The old ladder (backspace 1800, answer/exit 2400)
@@ -59,7 +78,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('C) start by gaze (includes TTS self-test path)');
   await gaze('#btnStart', 2400);
-  await sleep(4200);   // TTS self-test timeout in headless (no voices) is 3s
+  // the start awaits /settings and the speech self-test (capped at 3 s), logs
+  // session_start (after tts_failed when the test failed) and opens word 1
+  await until(async () => {
+    const s = logs.find(l => l.event === 'session_start');
+    return s && (s.tts || logs.some(l => l.event === 'tts_failed')) && await page.evaluate(() => S.phase === 'make');
+  }, 4200);
   check('stage visible', await page.locator('#stage').isVisible());
   check('letters + backspace', await page.locator('.letter').count() >= 6);
   check('vowels tinted', await page.locator('.letter.vowel').count() >= 1);
@@ -72,7 +96,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('D) make word 1 "as"');
   await park(); await gazeLetter('a'); await park(); await gazeLetter('s'); await park();
-  await sleep(2600);
+  // a match is logged, celebrated (silent with TTS off), held 350 ms, then word 2
+  await until(async () => attempts().length >= 1 && (await page.textContent('#promptSub')).includes('2 of'), 3000);
   const a1 = logs.filter(l => l.event === 'attempt');
   check('attempt ok logged', a1.length >= 1 && a1[0].ok === true, JSON.stringify(a1[0] || {}));
   check('advanced to word 2', (await page.textContent('#promptSub')).includes('2 of'));
@@ -83,23 +108,25 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   console.log('F) compare-and-fix: wrong letter keeps her correct work');
   await park(); await gazeLetter('d'); await park();     // "ad" instead of "an"
-  await sleep(2200);
+  // the miss re-renders the fix view in the same task that sends its /log row,
+  // so wait for the row (this process) and the dashed slot (the page) together
+  await until(async () => attempts().some(a => !a.ok) && await page.locator('.slot.check').count() >= 1, 3000);
   check('first miss: NO model yet (two-strike, D50)', await page.locator('#model .m').count() === 0);
   check('correct letter kept (locked a)', await page.locator('.slot.locked').count() >= 1);
   check('mismatch slot neutral (dashed check)', await page.locator('.slot.check').count() === 1);
   const bad = logs.filter(l => l.event === 'attempt' && !l.ok);
   check('mismatch logged not punished', bad.length === 1 && bad[0].got === 'ad');
   await park(); await gazeLetter('n'); await park();
-  await sleep(2600);
+  await until(async () => (await page.textContent('#promptSub')).includes('3 of'), 3000);
   check('fixed with ONE dwell, advanced to word 3', (await page.textContent('#promptSub')).includes('3 of'),
         await page.textContent('#promptSub'));
 
   console.log('G) backspace clears only unlocked slots');
   // word 3 "and": a,n locked; add wrong letter then backspace
+  const tries = attempts().length;
   await park(); await gazeLetter('h'); await park();
-  await sleep(300);
+  await until(() => attempts().length > tries, 1000);   // "anh" checked before the backspace
   await gaze('#backspace', 2400);
-  await sleep(400);
   const lockedAfter = await page.locator('.slot.locked').count();
   const filledAfter = await page.locator('.slot.filled').count();
   check('locked letters survive backspace', lockedAfter === 2 && filledAfter === 2,
@@ -114,7 +141,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('no .dwell inside strip', await page.locator('#partner .dwell').count() === 0);
   await page.click('#partnerTab');
   check('opens on touch', await page.locator('#partner.show').count() === 1);
-  await page.click('#pSkip'); await sleep(700);
+  await page.click('#pSkip');
+  await until(() => logs.some(l => l.event === 'partner' && l.action === 'skip'), 2000);
   check('skip logged with phase', logs.some(l => l.event === 'partner' && l.action === 'skip' && l.phase));
   await page.click('#pClose');
   check('closes via ✕', await page.locator('#partner.show').count() === 0);
@@ -132,7 +160,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.evaluate(() => { if (window.speechSynthesis) speechSynthesis.speak = u => setTimeout(() => u.onend && u.onend(), 0); });
   let exitHits = 0;
   await page.route('**/kiosk/exit', r => { exitHits++; r.fulfill({ status: 200, contentType: 'application/json', body: '{"action":"closed"}' }); });
-  await page.click('#barDoor'); await sleep(700);
+  await page.click('#barDoor');
+  await until(() => exitHits >= 1, 2000);
+  await sleep(400);   // prove-absence window: no second POST, no navigation after the answer
   check('door POSTs /kiosk/exit once', exitHits === 1, 'hits=' + exitHits);
   check('closed: no navigation (kiosk is closing)', /127\.0\.0\.1:8377\/$/.test(page.url()), page.url());
   await page.unroute('**/kiosk/exit');
