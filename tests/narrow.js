@@ -11,14 +11,18 @@ const check = (n, c, x) => { if (c) { pass++; console.log('  PASS  ' + n); } els
     await page.route('**/runway', r => r.fulfill({ status: 204, body: '' }));
     await page.route('**/voices', r => r.fulfill({ status: 200, contentType: 'application/json', body: '{"enabled":false,"voices":[]}' }));
     await page.route('**/tts', r => r.fulfill({ status: 503, body: '' }));
+    // page-side waits; a timeout falls through to the checks
+    const waitFor = (fn, ms) => page.waitForFunction(fn, null, { timeout: ms }).catch(() => {});
     await page.goto('http://127.0.0.1:8377/');
     await page.evaluate(() => Dwell.set({ ms: 250, graceMs: 120, decayMs: 250 }));
-    await sleep(900);
+    await waitFor(() => S.lesson && runwayCfg, 5000);   // boot loaded the lessons + runway
     await page.evaluate(() => setPointer(1));   // lesson 11 "clamps": 6 letters + backspace = 7 tray items
-    await sleep(300);
     const b = await page.locator('#btnStart').boundingBox();
     await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 });
-    await sleep(2400); await sleep(3600);
+    // the dwell starts it; after /settings and the speech self-test (capped at 3 s)
+    // word 1 opens. Measure in that settled state, and never sort under a start
+    // still running (its startMakeWord would re-show the slots under the sort).
+    await waitFor(() => S.phase === 'make', 6000);
     const geo = await page.evaluate(() => {
       const items = [...document.querySelectorAll('#tray .letter')];
       // one row = all vertical CENTERS within 40px (backspace is shorter but centered)
@@ -32,7 +36,8 @@ const check = (n, c, x) => { if (c) { pass++; console.log('  PASS  ' + n); } els
           geo.rows === 1 && geo.onscreen, JSON.stringify(geo));
     // sort phase geometry on the same lesson (the second photo bug)
     await page.evaluate(() => { S.sortType='first-letter'; S.sortCols=buildSortCols('first-letter'); S.sortIdx = 0; startSort(); });
-    await sleep(700);
+    // heads render at once; the first word is named after the (silent) sort line
+    await waitFor(() => S.phase === 'sort' && document.getElementById('sortword')?.textContent, 2000);
     const sg = await page.evaluate(() => {
       const heads = [...document.querySelectorAll('.sorthead')];
       const rects = heads.map(e => e.getBoundingClientRect());
