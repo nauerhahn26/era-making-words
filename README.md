@@ -10,3 +10,9 @@ app (8/28 ruling) — the 100-lesson sequence transcribed from Making Words
 First Grade (Cunningham & Hall), attributed in the file's `source` field.
 Families can replace it with their own `lessons.json` (same shape) in the
 hub's public folder; `runway.json` is optional (lesson order is synthesized).
+
+## App locks
+
+The shared door bar now offers an independent app lock using era-core’s
+controller and adult passcode UI. Locking stops activity, preserves work and
+keeps exit and communication doors available. The hub’s app-lock plan records validation and release status.

@@ -19,6 +19,13 @@
  *  - Assessment is invisible: everything logs quietly to /log.
  */
 "use strict";
+const appLocked = () => window.AppLock?.isLocked() || false;
+let lockGeneration = 0;
+function interrupted(generation, continuation) {
+  if (!appLocked() && generation === lockGeneration) return false;
+  if (continuation) window.AppLock?.get('making-words').deferResume(continuation);
+  return true;
+}
 // lib/contract.js values via the index.html shim — the whitelist, not copies.
 const EC = window.EllieContract.CONTRACT;
 // lib/doorbar.js via the same shim — the shared 🚪/💬 strip all five apps wear.
@@ -72,7 +79,7 @@ function log(event, detail) {
 // file wants to say reaches the speech layer at all. Resolving (rather than
 // hanging) keeps every awaiting chain unwound, exactly as a cancel does.
 function say(text, opts) {
-  if (S.paused) return Promise.resolve();
+  if (appLocked() || S.paused) return Promise.resolve();
   return sayNow(text, opts);
 }
 // THE ONE EXCEPTION, and the reason it is safe (dad 9/17): an ADULT PRESS.
@@ -85,7 +92,7 @@ function say(text, opts) {
 // is no 🔁 to press. So this bypass belongs to repeatPrompt() ALONE (the partner
 // strip's 🔁 and her #replay tile) and must never be given to anything chained.
 function sayNow(text, opts) {
-  if (!S.tts || !window.Speech) return Promise.resolve();
+  if (appLocked() || !S.tts || !window.Speech) return Promise.resolve();
   return Speech.say(text, (opts && opts.kind) || "long");
 }
 function spellOut(word) { return word.split("").join(", "); }
@@ -493,6 +500,8 @@ function alignment(prev, w) {
 }
 
 async function startMakeWord() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   S.phase = "make"; S.fixing = false; S.misses = 0;
   const w = currentWord();
   const prev = S.wordIdx > 0 ? S.lesson.make[S.wordIdx - 1] : null;
@@ -507,7 +516,9 @@ async function startMakeWord() {
   resetNudges();
   log("word_start", { word: w, op, prefilled: pre.filter(Boolean).length });
   await say(op);
+  if (interrupted(lockRun)) return;
   await say(sentenceFor(w));
+  if (interrupted(lockRun)) return;
 }
 
 document.addEventListener("dwell:tap-dropped", (e) =>
@@ -522,6 +533,8 @@ function renderStartSub() {
 }
 
 async function pickLetter(L) {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   if (S.paused) return;
   // COMPLETED-TASK WINDOW (dad 7/28): once the word is done, letter taps are
   // fully INERT until the next word is offered — no barge-in, no echo, no
@@ -548,7 +561,7 @@ async function pickLetter(L) {
 }
 
 function unpickLetter() {
-  if (S.paused || S.transitioning) return;
+  if (appLocked() || S.paused || S.transitioning) return;
   if (window.Speech) Speech.stop();
   // clear the LAST filled slot that is not locked
   for (let i = S.attempt.length - 1; i >= 0; i--) {
@@ -563,6 +576,8 @@ function unpickLetter() {
 }
 
 async function checkAttempt(w) {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   const got = S.attempt.join("");
   const ok = got.toLowerCase() === w.toLowerCase();
   if (!ok && S.phase !== "secret") S.misses++;
@@ -576,8 +591,10 @@ async function checkAttempt(w) {
     S.transitioning = true;
     try {
       await say(`${soundOut(w)} — ${w}! ${praise()}`);
+      if (interrupted(lockRun, advance)) return;
       await pause(350);
-    } finally { S.transitioning = false; }
+      if (interrupted(lockRun, advance)) return;
+    } finally { if (lockRun === lockGeneration) S.transitioning = false; }
     return advance();
   }
   if (S.phase === "secret") return revealSecret(true);
@@ -615,8 +632,10 @@ async function checkAttempt(w) {
     log("found_word", { word: gotWord, target: w });
     addFoundWord(gotWord);
     await say(`${gotWord}! That's a real word too — I like it. Now, ${w}:`);
+    if (interrupted(lockRun)) return;
   } else {
     await say(`${soundOut(gotWord)} — hmm. ${encourage()}`);
+    if (interrupted(lockRun)) return;
   }
   S.finishMistake();   // mistake was seen AND heard; now show the fix view
   if (firstMiss) {
@@ -628,8 +647,10 @@ async function checkAttempt(w) {
     const have = kept.length ? ` You already have the ${kept.join(" and the ")} — keep them.` : "";
     const listen = missing.length ? ` Listen for the ${missing.join(", and the ")}.` : "";
     await say(`Remember, the word is ${w}.${have} ${soundOut(w)} — ${w}.${listen} Try again!`);
+    if (interrupted(lockRun)) return;
   } else {
     await say(`Let's check together. Look — ${spellOut(w)} spells ${w}. Fill in the missing letters.`);
+    if (interrupted(lockRun)) return;
   }
   // she fills the dashed slots; completion re-checks; phase and indexes untouched
   // (works identically in make and transfer — the review's P0-1)
@@ -637,6 +658,8 @@ async function checkAttempt(w) {
 
 const SECRET_MODE = !!(window.StudioConfig && window.StudioConfig.secretWord);  // her literacy specialist doesn't use the reveal ritual
 async function advance() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   renderModel(null);
   if (S.phase === "transfer") return advanceTransfer();
   if (S.phase === "secret") return revealSecret(false);
@@ -657,6 +680,8 @@ async function advance() {
 // her end-of-make ritual: the completed ladder rendered TOP-TO-BOTTOM like a
 // finished shopping list, retold as a story, then the break choice
 async function makeRecapThenBreak() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   const words = S.lesson.make.map(w => w.split("/")[0].trim());
   log("make_recap", { words });
   // render FIRST (she looks at the list while it's read), speak after
@@ -706,14 +731,18 @@ async function makeRecapThenBreak() {
     rest.style.borderColor = "var(--teal)";
     log("break_choice", { choice: "rest" });
     await say("Let's rest. Move about if you like! Look at Keep Going whenever you're ready.");
+    if (interrupted(lockRun, makeRecapThenBreak)) return;
   });
   els.bigRow.appendChild(go); els.bigRow.appendChild(rest);
   resetNudges();
   await say("Would you like to keep going to sorting, or rest first?");
+  if (interrupted(lockRun, makeRecapThenBreak)) return;
 }
 
 // ---------- SECRET WORD ----------
 async function startSecret() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   S.phase = "secret"; S.fixing = false; S.misses = 0;
   const w = secretWord();
   renderSlotsFrom(w, null); renderModel(null);
@@ -722,8 +751,11 @@ async function startSecret() {
   resetNudges();
   log("secret_start", { word: w });
   await say("Now for the secret word! It uses ALL of your letters. What could it be? Take your time.");
+  if (interrupted(lockRun)) return;
 }
 async function revealSecret(supported) {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   const w = secretWord();
   show("sBig");
   els.bigTitle.textContent = "The secret word is…";
@@ -732,6 +764,7 @@ async function revealSecret(supported) {
   confetti(14);
   log("secret_reveal", { word: w, solvedAlone: !supported });
   await say(`The secret word is ${w}! ${spellOut(w)} — ${w}. ${sentenceFor(w)}`);
+  if (interrupted(lockRun, () => revealSecret(supported))) return;
   // Her choice, not a timer (the reveal is the natural break point):
   els.bigRow.innerHTML = "";
   const go = document.createElement("div");
@@ -747,10 +780,12 @@ async function revealSecret(supported) {
     rest.style.borderColor = "var(--teal)";
     log("break_choice", { choice: "rest" });
     await say("Let's rest. Look at Keep Going whenever you're ready. No hurry at all.");
+    if (interrupted(lockRun, () => revealSecret(supported))) return;
   });
   els.bigRow.appendChild(go); els.bigRow.appendChild(rest);
   resetNudges();
   await say("Would you like to keep going, or rest?");
+  if (interrupted(lockRun, () => revealSecret(supported))) return;
 }
 
 // ---------- SORT phase ----------
@@ -862,6 +897,8 @@ let colElByIdx = {};     // original column index -> its .col element
 
 // sort-type chooser: first letter (simpler) vs rhyme (more complex) — both valid
 async function chooseSortType() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   return new Promise(res => {
     const native = S.lesson.sort.type === "rhyme" ? "rhyme" : "first-letter";
     show("sBig");
@@ -884,8 +921,12 @@ async function chooseSortType() {
 }
 
 async function startSort(forTransfer) {
+  let lockRun = lockGeneration;
+  if (appLocked()) return;
   if (!forTransfer && !S.sortType) {
     S.sortType = await chooseSortType();
+    if (appLocked()) return;
+    lockRun = lockGeneration;
     S.sortCols = buildSortCols(S.sortType);
     show("stage");
   } else if (forTransfer) {
@@ -946,6 +987,7 @@ async function startSort(forTransfer) {
   log("sort_start", { chosen: S.sortType, native: S.lesson.sort.type, columns: sortColumns() });
   await say(byRhyme ? "Now let's sort by rhyme! Put the words that sound the same at the end together."
                     : "Now let's sort by the first letter! Put the words that start the same together.");
+  if (interrupted(lockRun, nextSortWord)) return;
   nextSortWord();
 }
 
@@ -957,6 +999,8 @@ function onHeadActivate(idx) {
 
 function currentSortWord() { return sortRemaining()[S.sortIdx]; }
 async function nextSortWord() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   const w = currentSortWord();
   if (!w) return sortRecapThenTransfer();
   $("sortword").textContent = w;
@@ -968,6 +1012,8 @@ async function nextSortWord() {
 }
 let pickLock = false;
 async function pickColumn(idx) {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   if (pickLock || S.transitioning) return;                       // re-entrancy: one decision at a time
   const w = currentSortWord(); if (!w) return;
   if (window.Speech) Speech.stop();           // barge-in
@@ -986,12 +1032,14 @@ async function pickColumn(idx) {
     S.sortIdx++;
     S.transitioning = true;
     try {
-      if (isFirstLetterSort())
+      if (isFirstLetterSort()) {
         await say(`${soundOut(w)} — ${w}! ${w} begins with ${nameSound(w[0])}. ${praise()}`);
-      else
+      } else {
         await say(`${soundOut(w)} — ${w}! They rhyme! ${praise()}`);
+      }
+      if (interrupted(lockRun, nextSortWord)) return;
       return nextSortWord();
-    } finally { S.transitioning = false; }
+    } finally { if (lockRun === lockGeneration) S.transitioning = false; }
   }
   if (isFirstLetterSort()) {
     const picked = heads[idx];
@@ -1006,13 +1054,17 @@ async function pickColumn(idx) {
 }
 
 async function sortRecapThenTransfer() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   // her end-of-sort ritual: read each column back as a family
   for (const { c } of liveColumns()) {
     const words = isFirstLetterSort() ? c : c;
-    if (isFirstLetterSort())
+    if (isFirstLetterSort()) {
       await say(`You found ${words.length === 1 ? "a word" : words.length + " words"} beginning with ${nameSound(c[0][0])}: ${words.join(", ")}.`);
-    else
+    } else {
       await say(`${words.join(", ")} — they all rhyme!`);
+    }
+    if (interrupted(lockRun, startTransfer)) return;
   }
   startTransfer();
 }
@@ -1064,6 +1116,8 @@ function currentTransferWord() { return (S.spellWords || transferWords())[S.tran
 
 // transfer-type chooser: first letter (simpler) vs spell new words (at -> cat)
 async function chooseTransferType() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   return new Promise(res => {
     const native = (S.lesson.transfer && S.lesson.transfer.type === "words") ? "spell" : "first-letter";
     show("sBig");
@@ -1086,8 +1140,10 @@ async function chooseTransferType() {
 }
 
 async function startTransfer() {
+  let lockRun = lockGeneration;
+  if (appLocked()) return;
   if (S.part === "sort") return endLesson();     // sort-only day ends here
-  if (!S.transferType) { S.transferType = await chooseTransferType(); show("stage"); }
+  if (!S.transferType) { S.transferType = await chooseTransferType(); if (appLocked()) return; lockRun = lockGeneration; show("stage"); }
   if (S.transferType === "first-letter") {
     let flw = firstLetterWords().length ? firstLetterWords()
             : (transferWords().length ? transferWords() : deriveFamilyWords());
@@ -1123,6 +1179,7 @@ async function startTransfer() {
     done.addEventListener("click", () => { show("stage"); endLesson(); });
     els.bigRow.appendChild(done);
     await say("Transfer time! This part happens in the real world. " + hint + " Your grown-up will play with you!");
+    if (interrupted(lockRun)) return;
     return;
   }   // early lessons transfer to objects/pictures — done live w/ partner
   S.phase = "transfer"; S.transferIdx = 0;
@@ -1131,6 +1188,7 @@ async function startTransfer() {
   els.promptText.textContent = "New words — you can spell them!";
   log("transfer_start", { words });
   await say("Now the best part. Brand new words — and you already know how to spell them!");
+  if (interrupted(lockRun, transferOne)) return;
   transferOne();
 }
 
@@ -1138,6 +1196,8 @@ async function startTransfer() {
 // first letter among the lesson letters; the word lands in that letter's column ----
 const FL = { idx: 0, cols: {}, words: [], letters: [] };
 async function startFirstLetterTransfer(wordList) {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   S.phase = "transfer"; S.transferStep = 9;   // 9 = first-letter mode
   FL.idx = 0; FL.cols = {};
   FL.words = wordList || firstLetterWords();
@@ -1162,9 +1222,12 @@ async function startFirstLetterTransfer(wordList) {
   els.promptSub.textContent = "";
   log("transfer_firstletter_start", { words: FL.words });
   await say("Now for new words — words from the real world! Listen, and find the letter each one starts with.");
+  if (interrupted(lockRun, flNext)) return;
   flNext();
 }
 async function flNext() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   const w = FL.words[FL.idx];
   if (!w) return endLesson();
   els.promptSub.textContent = `Word ${FL.idx + 1} of ${FL.words.length} — listen… which letter does it start with?`;
@@ -1173,7 +1236,9 @@ async function flNext() {
   say(`${w}. ${sentenceFor(w)} Which letter does ${w} start with?`);
 }
 async function flPick(idx) {
-  if (S.paused || S.transferStep !== 9) return;
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
+  if (appLocked() || S.paused || S.transferStep !== 9) return;
   if (pickLock || S.transitioning) return;
   if (window.Speech) Speech.stop();
   pickLock = true; setTimeout(() => { pickLock = false; }, 350);
@@ -1188,8 +1253,9 @@ async function flPick(idx) {
     S.transitioning = true;
     try {
       await say(`${nameSound(w[0])} — ${w}! ${praise()}`);
+      if (interrupted(lockRun, flNext)) return;
       return flNext();
-    } finally { S.transitioning = false; }
+    } finally { if (lockRun === lockGeneration) S.transitioning = false; }
   }
   if (w.toLowerCase().includes(letters[idx]))
     say(`There IS a ${letters[idx]} in ${w} — good spotting! But listen to the FIRST sound: ${SOUNDS[w[0].toLowerCase()] || w[0]}… ${w}.`);
@@ -1215,6 +1281,8 @@ function modelFor(w) {
 }
 
 async function transferOne() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   const w = currentTransferWord();
   if (!w) return endLesson();
   S.transferStep = 1; S.fixing = false; S.misses = 0;
@@ -1239,9 +1307,12 @@ async function transferOne() {
   await say(model
     ? `I'll let you into a secret: you only need to think about the FIRST sound of ${w} — after that, you can copy what you already know from ${model}. ${sentenceFor(w)} Ready? Spell ${w}.`
     : `Now spell ${w}. ${sentenceFor(w)}`);
+  if (interrupted(lockRun)) return;
 }
 
 async function advanceTransfer() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   S.transferIdx++;
   renderModel(null);
   if (S.transferIdx < (S.spellWords || transferWords()).length) return transferOne();
@@ -1250,6 +1321,8 @@ async function advanceTransfer() {
 
 // ---------- end / rating ----------
 async function endLesson() {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   S.phase = "end"; S.rated = false;
   $("adultBar").style.display = "flex";   // back for the adult between sessions
   document.querySelectorAll("#sEnd .action").forEach(a => a.removeAttribute("data-dwell-disabled"));
@@ -1258,6 +1331,7 @@ async function endLesson() {
   log("lesson_end", { lesson: S.lesson.lesson });
   resetNudges();
   await say("You did it! A whole lesson. How was that for you?");
+  if (interrupted(lockRun)) return;
 }
 document.querySelectorAll("#sEnd .action").forEach(a => {
   a.addEventListener("click", async () => {
@@ -1291,7 +1365,7 @@ function backToStart() {
 
 // ---------- gentle nudge loop (wait time sacred; never advances anything) ----------
 setInterval(() => {
-  if (S.paused || !["make", "sort", "transfer", "secret"].includes(S.phase)) return;
+  if (appLocked() || S.paused || !["make", "sort", "transfer", "secret"].includes(S.phase)) return;
   const idle = Date.now() - S.lastPromptAt;
   if (idle < 45000) return;
   if (S.nudges === 0) {
@@ -1372,6 +1446,8 @@ function adultLabel() {
   $("aLesson").textContent = "Lesson " + e.lesson + " · " + (S.lesson ? S.lesson.secret_word : "");
 }
 async function setPointer(idx) {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   idx = Math.max(0, Math.min(runwayCfg.sequence.length - 1, idx));
   S.seqIdx = idx;
   S.lesson = runwayDb.lessons.find(l => l.lesson === runwayCfg.sequence[idx].lesson);
@@ -1414,6 +1490,16 @@ document.querySelectorAll(".abtn.part").forEach(b => {
 // the partner's to lift.
 let pausedBeforeTalk = false;
 doorBar = EB.mountDoorBar(document.body, {
+  onLock() {
+    lockGeneration++;
+    if (S.phase === 'start' && S.starting) window.AppLock.get('making-words').deferResume(() => {
+      if (S.part === 'sort') return startSort();
+      if (S.part === 'transfer') return startSort('forTransfer');
+      return startMakeWord();
+    });
+    S.transitioning = false;
+    if (window.Speech) Speech.stop();
+  },
   onLeave: () => {
     if (window.Speech) Speech.stop();
     log("door", { phase: S.phase });
@@ -1506,6 +1592,8 @@ async function boot() {
   }
 }
 $("btnStart").addEventListener("click", async () => {
+  const lockRun = lockGeneration;
+  if (appLocked()) return;
   if (!S.lesson || S.starting) return;
   // INSTANT acknowledgment (7/28): the awaits below (settings + voice warm-up)
   // take 2-4s — without this, a SUCCESSFUL press looks identical to a dead one
@@ -1526,8 +1614,10 @@ $("btnStart").addEventListener("click", async () => {
   show("stage");
   if (S.part !== "sort" && S.part !== "transfer") buildTray(S.lesson.letters, true);
   const st = await settingsP;
+  if (interrupted(lockRun, () => S.part === 'sort' ? startSort() : S.part === 'transfer' ? startSort('forTransfer') : startMakeWord())) return;
   applySettings(st);
   const mode = await initP;
+  if (interrupted(lockRun, () => S.part === 'sort' ? startSort() : S.part === 'transfer' ? startSort('forTransfer') : startMakeWord())) return;
   S.tts = mode !== "off";
   if (!S.tts) { $("ttsWarn").classList.add("show"); log("tts_failed", {}); }
   log("session_start", { tts: S.tts, speech: mode, part: S.part });
@@ -1535,6 +1625,7 @@ $("btnStart").addEventListener("click", async () => {
   if (S.part === "transfer") { return startSort("forTransfer"); }
   const note = (S.lesson.vowel_note || "").replace(/\.$/, "");
   await say(`Today your letters are ${S.lesson.letters.join(", ")}.` + (note ? ` ${note}.` : ""));
+  if (interrupted(lockRun, () => S.part === 'sort' ? startSort() : S.part === 'transfer' ? startSort('forTransfer') : startMakeWord())) return;
   S.wordIdx = 0;
   startMakeWord();
 });
